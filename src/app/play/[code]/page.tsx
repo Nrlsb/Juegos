@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { BINGO_SONGS } from '@/lib/bingoSongs';
+import { getMoviePoster } from '@/lib/moviePosters';
 
 interface Question {
   id: string;
@@ -1038,33 +1039,62 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                 </div>
 
                 {!hasAnswered ? (
-                  /* OPCIONES DE PELÍCULAS */
-                  <div className="grid grid-cols-1 gap-3.5 mb-6">
+                  /* OPCIONES DE PELÍCULAS CON PORTADAS */
+                  <div className="grid grid-cols-2 gap-3 mb-6">
                     {activeQuestion.options.map((opt: string, i: number) => {
-                      const colors = [
-                        'border-zinc-800 hover:border-neon-blue focus:border-neon-blue active:bg-neon-blue/10',
-                        'border-zinc-800 hover:border-neon-pink focus:border-neon-pink active:bg-neon-pink/10',
-                        'border-zinc-800 hover:border-neon-purple focus:border-neon-purple active:bg-neon-purple/10',
-                        'border-zinc-800 hover:border-neon-green focus:border-neon-green active:bg-neon-green/10'
+                      const borderColors = [
+                        'border-zinc-800 hover:border-neon-blue active:border-neon-blue',
+                        'border-zinc-800 hover:border-neon-pink active:border-neon-pink',
+                        'border-zinc-800 hover:border-neon-purple active:border-neon-purple',
+                        'border-zinc-800 hover:border-neon-green active:border-neon-green',
+                      ];
+                      const overlayColors = [
+                        'from-neon-blue/80',
+                        'from-neon-pink/80',
+                        'from-neon-purple/80',
+                        'from-neon-green/80',
                       ];
                       const bullets = [
-                        'bg-neon-blue/15 text-neon-blue border-neon-blue/30',
-                        'bg-neon-pink/15 text-neon-pink border-neon-pink/30',
-                        'bg-neon-purple/15 text-neon-purple border-neon-purple/30',
-                        'bg-neon-green/15 text-neon-green border-neon-green/30'
+                        'bg-neon-blue text-zinc-950',
+                        'bg-neon-pink text-zinc-950',
+                        'bg-neon-purple text-zinc-950',
+                        'bg-neon-green text-zinc-950',
                       ];
+                      const posterUrl = getMoviePoster(opt);
 
                       return (
                         <button
                           key={i}
                           onClick={() => submitAnswer(i)}
                           disabled={submittingAnswer}
-                          className={`w-full p-4 rounded-2xl border bg-zinc-950/40 text-left font-bold text-white transition duration-150 flex items-center gap-3 cursor-pointer ${colors[i % 4]}`}
+                          className={`relative rounded-2xl border-2 overflow-hidden cursor-pointer transition-all duration-150 active:scale-95 ${borderColors[i % 4]}`}
+                          style={{ aspectRatio: '2/3' }}
                         >
-                          <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm border font-extrabold ${bullets[i % 4]}`}>
+                          {/* Imagen de portada */}
+                          {posterUrl ? (
+                            <img
+                              src={posterUrl}
+                              alt={opt}
+                              className="absolute inset-0 w-full h-full object-cover"
+                              loading="eager"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 w-full h-full bg-zinc-900 flex items-center justify-center">
+                              <Music className="w-10 h-10 text-zinc-600" />
+                            </div>
+                          )}
+
+                          {/* Degradado inferior con nombre */}
+                          <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${overlayColors[i % 4]} to-transparent pt-8 pb-3 px-2`}>
+                            <span className="text-white font-black text-xs leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] block text-center">
+                              {opt}
+                            </span>
+                          </div>
+
+                          {/* Badge letra (A, B, C, D) */}
+                          <div className={`absolute top-2 left-2 w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shadow-lg ${bullets[i % 4]}`}>
                             {String.fromCharCode(65 + i)}
-                          </span>
-                          <span>{opt}</span>
+                          </div>
                         </button>
                       );
                     })}
