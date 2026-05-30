@@ -191,12 +191,38 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
   useEffect(() => {
     if (!playerRef.current || !audioEnabled) return;
     try {
-      if (musicVideoPlaying) {
-        playerRef.current.seekTo(musicVideoTime, true);
-        playerRef.current.playVideo();
+      const isPlaying = musicVideoPlaying;
+      const targetTime = musicVideoTime;
+
+      // Obtener el estado actual y tiempo actual del reproductor
+      const playerState = typeof playerRef.current.getPlayerState === 'function'
+        ? playerRef.current.getPlayerState()
+        : -1;
+
+      const ytTime = typeof playerRef.current.getCurrentTime === 'function'
+        ? playerRef.current.getCurrentTime()
+        : 0;
+
+      const timeDiff = Math.abs(ytTime - targetTime);
+
+      if (isPlaying) {
+        // YT.PlayerState: UNSTARTED = -1, PLAYING = 1, PAUSED = 2, BUFFERING = 3, CUED = 5
+        if (playerState !== 1 && playerState !== 3) {
+          playerRef.current.seekTo(targetTime, true);
+          playerRef.current.playVideo();
+        } else if (timeDiff > 3) {
+          // Si ya se está reproduciendo pero el desfase supera el umbral de tolerancia (3s), reposicionamos
+          playerRef.current.seekTo(targetTime, true);
+        }
       } else {
-        playerRef.current.pauseVideo();
-        playerRef.current.seekTo(musicVideoTime, true);
+        // Pausar si actualmente está reproduciéndose o buffereando
+        if (playerState === 1 || playerState === 3) {
+          playerRef.current.pauseVideo();
+        }
+        // Si el tiempo difiere significativamente del objetivo, reposicionamos
+        if (timeDiff > 2) {
+          playerRef.current.seekTo(targetTime, true);
+        }
       }
     } catch (e) {
       console.error('Error al controlar reproductor de audio:', e);

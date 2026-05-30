@@ -84,6 +84,7 @@ export default function AdminPage() {
   const [playerReady, setPlayerReady] = useState(false);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
   const [askedMusicQuestionIds, setAskedMusicQuestionIds] = useState<string[]>([]);
+  const ignoreStateChangeRef = useRef(false);
 
   // Seleccionar una pregunta de la lista para el pulsador
   const handleSelectBuzzerQuestion = (q: BuzzerQuestion) => {
@@ -111,6 +112,7 @@ export default function AdminPage() {
 
   // Sincronizar estado del reproductor de YouTube con Supabase
   const handleAdminPlayerStateChange = async (state: number) => {
+    if (ignoreStateChangeRef.current) return;
     const currentRoom = roomRef.current;
     if (!currentRoom || !playerRef.current) return;
 
@@ -824,20 +826,27 @@ export default function AdminPage() {
   };
 
   // Sincronizar tiempo de video de música periódicamente si está reproduciéndose
+  // Usamos roomRef para evitar cierres de ámbito obsoletos (stale closures) y limitamos la actualización
   useEffect(() => {
-    if (!room || room.status !== 'MUSIC' || !room.music_video_playing || !playerRef.current) return;
+    const currentRoom = roomRef.current;
+    if (!currentRoom || currentRoom.status !== 'MUSIC' || !currentRoom.music_video_playing || !playerRef.current) return;
 
     const syncInterval = setInterval(async () => {
+      if (ignoreStateChangeRef.current) return;
+      const latestRoom = roomRef.current;
+      if (!latestRoom || !playerRef.current) return;
+
       if (typeof playerRef.current.getCurrentTime === 'function') {
         const currentTime = Math.floor(playerRef.current.getCurrentTime());
-        if (Math.abs(currentTime - room.music_video_time) > 2) {
+        // Solo sincronizamos si hay un desvío mayor a 3 segundos para evitar escrituras redundantes continuas
+        if (Math.abs(currentTime - (latestRoom.music_video_time || 0)) > 3) {
           await supabase
             .from('rooms')
             .update({ music_video_time: currentTime })
-            .eq('id', room.id);
+            .eq('id', latestRoom.id);
         }
       }
-    }, 3000);
+    }, 4000);
 
     return () => clearInterval(syncInterval);
   }, [room?.music_video_playing, room?.status]);
@@ -846,6 +855,7 @@ export default function AdminPage() {
   const launchMusicQuestion = async (q: Question) => {
     setLoading(true);
     try {
+      ignoreStateChangeRef.current = true;
       const { error: rError } = await supabase
         .from('responses')
         .delete()
@@ -887,8 +897,14 @@ export default function AdminPage() {
           playerRef.current.pauseVideo();
         }
       }
+      
+      // Esperamos un segundo a que se estabilice el reproductor antes de aceptar eventos automáticos
+      setTimeout(() => {
+        ignoreStateChangeRef.current = false;
+      }, 1000);
     } catch (err: any) {
       alert('Error al lanzar canción: ' + err.message);
+      ignoreStateChangeRef.current = false;
     } finally {
       setLoading(false);
     }
@@ -898,6 +914,7 @@ export default function AdminPage() {
   const toggleMusicPlayback = async () => {
     if (!room || !playerRef.current) return;
     try {
+      ignoreStateChangeRef.current = true;
       const isCurrentlyPlaying = room.music_video_playing;
       let currentTime = room.music_video_time || 0;
 
@@ -907,12 +924,21 @@ export default function AdminPage() {
         }
         playerRef.current.pauseVideo();
       } else {
+        const activeQ = questions.find(q => q.id === room.current_question_id);
+        const startSec = activeQ?.video_start_seconds || 0;
+        
         let ytTime = 0;
         if (typeof playerRef.current.getCurrentTime === 'function') {
           ytTime = Math.floor(playerRef.current.getCurrentTime());
         }
-        // Si ytTime es mayor que 0, lo usamos. Si no, usamos el tiempo guardado en la sala.
-        currentTime = ytTime > 0 ? ytTime : (room.music_video_time || 0);
+        
+        // Si el tiempo actual de YouTube es 0 o difiere significativamente del inicio de la pregunta activa,
+        // forzamos a que empiece en el segundo de inicio correcto para evitar desfases del buffer
+        if (ytTime === 0 || Math.abs(ytTime - startSec) > 10) {
+          currentTime = startSec;
+        } else {
+          currentTime = ytTime;
+        }
         
         if (typeof playerRef.current.seekTo === 'function') {
           playerRef.current.seekTo(currentTime, true);
@@ -932,8 +958,13 @@ export default function AdminPage() {
 
       if (error) throw error;
       setRoom(data);
+
+      setTimeout(() => {
+        ignoreStateChangeRef.current = false;
+      }, 800);
     } catch (e) {
       console.error(e);
+      ignoreStateChangeRef.current = false;
     }
   };
 
@@ -941,6 +972,7 @@ export default function AdminPage() {
   const seekMusicBySeconds = async (seconds: number) => {
     if (!room || !playerRef.current) return;
     try {
+      ignoreStateChangeRef.current = true;
       let currentTime = room.music_video_time || 0;
       if (typeof playerRef.current.getCurrentTime === 'function') {
         currentTime = Math.floor(playerRef.current.getCurrentTime());
@@ -963,8 +995,13 @@ export default function AdminPage() {
 
       if (error) throw error;
       setRoom(data);
+
+      setTimeout(() => {
+        ignoreStateChangeRef.current = false;
+      }, 800);
     } catch (e) {
       console.error('Error al adelantar/retroceder música:', e);
+      ignoreStateChangeRef.current = false;
     }
   };
 
