@@ -457,9 +457,9 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
     if (cardGeneratingRef.current) return;
     cardGeneratingRef.current = true;
     
-    // Mezclar las 45 canciones y tomar 9
+    // Mezclar las 45 canciones y tomar 12
     const shuffled = [...BINGO_SONGS].sort(() => Math.random() - 0.5);
-    const card = shuffled.slice(0, 9);
+    const card = shuffled.slice(0, 12);
 
     try {
       const { data, error } = await supabase
@@ -1052,7 +1052,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                 </div>
                 <h3 className="text-xl font-bold text-white mb-2">Generando Cartón</h3>
                 <p className="text-zinc-400 text-sm">
-                  Cargando tus 9 canciones de la playlist...
+                  Cargando tus 12 canciones de la playlist...
                 </p>
               </div>
             ) : bingoWinner ? (
@@ -1068,7 +1068,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                   El administrador ha validado tu cartón. ¡Eres el campeón indiscutible de esta ronda de Bingo Musical!
                 </p>
                 <div className="bg-zinc-950/60 border border-zinc-900 rounded-2xl py-3 px-6 text-center font-bold text-xs text-zinc-400">
-                  Total de canciones marcadas: <strong className="text-amber-400 font-mono text-sm">{bingoMarked.length} / 9</strong>
+                  Total de canciones marcadas: <strong className="text-amber-400 font-mono text-sm">{bingoMarked.length} / 12</strong>
                 </div>
               </div>
             ) : (
@@ -1106,8 +1106,8 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                   Marca las canciones de tu cartón a medida que vayan sonando. Haz clic en una celda para marcarla.
                 </p>
 
-                {/* Tablero 3x3 */}
-                <div className="grid grid-cols-3 gap-2.5 my-1">
+                {/* Tablero 4x3 */}
+                <div className="grid grid-cols-4 gap-2 my-1">
                   {bingoCard.map((song: any, idx: number) => {
                     const isMarked = bingoMarked.includes(idx);
                     const hasPlayed = bingoSongsPlayed.some(s => s.title === song.title);
@@ -1131,10 +1131,10 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                         key={idx}
                         onClick={() => toggleBingoMark(idx)}
                         disabled={bingoCalled || bingoWinner}
-                        className={`p-2 rounded-2xl border text-center flex flex-col justify-between min-h-[95px] active:scale-95 transition-all duration-100 cursor-pointer disabled:cursor-not-allowed select-none ${cellClass}`}
+                        className={`p-1.5 rounded-xl border text-center flex flex-col justify-between min-h-[82px] active:scale-95 transition-all duration-100 cursor-pointer disabled:cursor-not-allowed select-none ${cellClass}`}
                         style={{ touchAction: 'manipulation' }}
                       >
-                        <span className="text-[8px] font-mono text-zinc-600 block mb-1">
+                        <span className="text-[7.5px] font-mono text-zinc-650 block mb-0.5">
                           #{idx + 1}
                         </span>
                         <p className="text-[10px] font-bold leading-tight line-clamp-3 mb-1 break-words">

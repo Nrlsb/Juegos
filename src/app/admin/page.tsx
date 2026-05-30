@@ -3152,10 +3152,10 @@ export default function AdminPage() {
                           🏆 {playerWhoCalled.nickname} ha cantado Bingo!
                         </h3>
                         <p className="text-xs text-zinc-300 mb-4">
-                          Verifica las canciones marcadas en su cartón de 3x3. Las canciones marcadas que ya han sonado se muestran con ✓. Si hay alguna marca roja, significa que no ha sonado.
+                          Verifica las canciones marcadas en su cartón de 4x3. Las canciones marcadas que ya han sonado se muestran con ✓. Si hay alguna marca roja, significa que no ha sonado.
                         </p>
 
-                        <div className="max-w-md mx-auto grid grid-cols-3 gap-3 mb-6">
+                        <div className="max-w-md mx-auto grid grid-cols-4 gap-3 mb-6">
                           {card.map((song: any, idx: number) => {
                             const isMarked = marked.includes(idx);
                             const hasPlayed = played.some((pSong: any) => pSong.title === song.title);
