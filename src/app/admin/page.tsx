@@ -47,6 +47,11 @@ export default function AdminPage() {
   const [gameStarted, setGameStarted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const roomRef = useRef<any>(null);
+
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
 
   // Pestaña activa de administración de preguntas (cuando no hay sala)
   const [activeQuestionTab, setActiveQuestionTab] = useState<'trivia' | 'buzzer' | 'music'>('trivia');
@@ -103,6 +108,41 @@ export default function AdminPage() {
     fetchBuzzerQuestions();
   }, []);
 
+  // Sincronizar estado del reproductor de YouTube con Supabase
+  const handleAdminPlayerStateChange = async (state: number) => {
+    const currentRoom = roomRef.current;
+    if (!currentRoom || !playerRef.current) return;
+
+    // 1 = YT.PlayerState.PLAYING
+    const isPlaying = state === 1;
+
+    // Evitar actualizaciones de base de datos redundantes si el estado ya coincide
+    if (isPlaying === currentRoom.music_video_playing) return;
+
+    try {
+      let currentTime = 0;
+      if (typeof playerRef.current.getCurrentTime === 'function') {
+        currentTime = Math.floor(playerRef.current.getCurrentTime());
+      }
+
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          music_video_playing: isPlaying,
+          music_video_time: currentTime
+        })
+        .eq('id', currentRoom.id)
+        .select()
+        .single();
+
+      if (data && !error) {
+        setRoom(data);
+      }
+    } catch (e) {
+      console.error('Error al sincronizar estado de reproducción de YouTube:', e);
+    }
+  };
+
   // Inicializar YouTube Iframe API para el Administrador
   useEffect(() => {
     if (!(window as any).YT) {
@@ -133,6 +173,9 @@ export default function AdminPage() {
           events: {
             onReady: () => {
               setPlayerReady(true);
+            },
+            onStateChange: (event: any) => {
+              handleAdminPlayerStateChange(event.data);
             }
           }
         });
@@ -829,11 +872,13 @@ export default function AdminPage() {
       setRoom(data);
       setResponses([]);
 
-      if (playerRef.current && typeof playerRef.current.cueVideoById === 'function') {
-        playerRef.current.cueVideoById({
-          videoId: 'vLD_R65SvAQ',
-          startSeconds: q.video_start_seconds || 0
-        });
+      if (playerRef.current) {
+        if (typeof playerRef.current.seekTo === 'function') {
+          playerRef.current.seekTo(q.video_start_seconds || 0, true);
+        }
+        if (typeof playerRef.current.pauseVideo === 'function') {
+          playerRef.current.pauseVideo();
+        }
       }
     } catch (err: any) {
       alert('Error al lanzar canción: ' + err.message);
@@ -2426,195 +2471,206 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {!room.current_question_id ? (
-                    /* LISTADO DE CANCIONES DE MÚSICA DISPONIBLES PARA LANZAR */
-                    <div className="flex-1 flex flex-col">
-                      <div className="mb-4 relative">
-                        <input
-                          type="text"
-                          value={musicSearchQuery}
-                          onChange={(e) => setMusicSearchQuery(e.target.value)}
-                          placeholder="Buscar película o canción de Disney..."
-                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-white text-sm focus:outline-none focus:border-neon-green focus:ring-1 focus:ring-neon-green/20 transition"
-                        />
-                        <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3.5" />
+                  <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Columna Izquierda: Reproductor y controles permanentes (5 columnas) */}
+                    <div className="lg:col-span-5 flex flex-col gap-4 font-sans border-r border-zinc-900/50 pr-0 lg:pr-6">
+                      <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-widest block">Reproductor de Video</span>
+                      
+                      {/* Contenedor del reproductor de YouTube */}
+                      <div className="w-full aspect-video rounded-2xl overflow-hidden border border-zinc-800 bg-black relative flex items-center justify-center">
+                        <div id="admin-youtube-player" className="w-full h-full"></div>
+                        {!playerReady && (
+                          <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center gap-2">
+                            <span className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-neon-green border-t-transparent"></span>
+                            <span className="text-xs text-zinc-400 font-medium">Cargando reproductor...</span>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex-1 overflow-y-auto max-h-[360px] space-y-2 pr-1 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent font-sans">
-                        {(() => {
-                          const musicQuestions = questions.filter(q => q.category === 'music');
-                          const filtered = musicQuestions.filter(q => 
-                            q.question_text.toLowerCase().includes(musicSearchQuery.toLowerCase()) ||
-                            (q.song_title && q.song_title.toLowerCase().includes(musicSearchQuery.toLowerCase())) ||
-                            q.options.some(opt => opt.toLowerCase().includes(musicSearchQuery.toLowerCase()))
-                          );
+                      {/* Controles de reproducción */}
+                      <div className="flex items-center gap-3 bg-zinc-950/40 p-4 rounded-xl border border-zinc-900">
+                        <button
+                          onClick={toggleMusicPlayback}
+                          disabled={!playerReady}
+                          className={`w-12 h-12 rounded-full flex items-center justify-center transition shrink-0 cursor-pointer ${
+                            room.music_video_playing
+                              ? 'bg-neon-red/10 text-neon-red border border-neon-red/30 hover:bg-neon-red/20'
+                              : 'bg-neon-green/10 text-neon-green border border-neon-green/30 hover:bg-neon-green/20'
+                          }`}
+                        >
+                          {room.music_video_playing ? (
+                            <Pause className="w-5 h-5 fill-current" />
+                          ) : (
+                            <Play className="w-5 h-5 fill-current ml-0.5" />
+                          )}
+                        </button>
 
-                          return (
-                            <>
-                              {filtered.map((q) => (
-                                <div key={q.id} className="p-3 bg-zinc-950/30 border border-zinc-900 rounded-xl flex items-center justify-between hover:border-zinc-850 hover:bg-zinc-900/10 transition">
-                                  <div className="flex-1 min-w-0 pr-4">
-                                    <h4 className="text-sm font-bold text-white flex items-center gap-1.5 truncate">
-                                      <Music className="w-3.5 h-3.5 text-neon-green font-normal" />
-                                      {q.song_title || 'Canción sin título'}
-                                    </h4>
-                                    <p className="text-xs text-zinc-400 mt-0.5 truncate">
-                                      Película correcta: <strong className="text-neon-green">{q.options[q.correct_option_index]}</strong>
-                                    </p>
-                                    <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                                      Segundo de inicio: {q.video_start_seconds}s
-                                    </p>
-                                  </div>
-                                  
-                                  <button
-                                    onClick={() => launchMusicQuestion(q)}
-                                    disabled={loading}
-                                    className="bg-neon-green/10 hover:bg-neon-green/20 text-neon-green border border-neon-green/30 hover:border-neon-green font-bold text-xs py-2 px-4 rounded-xl transition cursor-pointer flex items-center gap-1 shrink-0"
-                                  >
-                                    Lanzar canción
-                                  </button>
-                                </div>
-                              ))}
-
-                              {filtered.length === 0 && (
-                                <div className="text-center py-12 text-zinc-600">
-                                  <Music className="w-10 h-10 mx-auto mb-2 opacity-25" />
-                                  <p className="text-xs font-semibold">No se encontraron canciones que coincidan.</p>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-white truncate">
+                            {room.music_video_playing ? 'Reproduciendo audio...' : 'Audio en pausa'}
+                          </p>
+                          <p className="text-[10px] text-zinc-500 leading-tight">
+                            Sincronizado con los teléfonos de los usuarios.
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    /* REPRODUCTOR Y CONTROL DE LA CANCIÓN SELECCIONADA */
-                    <div className="flex-1 flex flex-col gap-4 font-sans">
-                      {(() => {
+
+                      {/* Información de la canción activa y botón para finalizar ronda */}
+                      {room.current_question_id && (() => {
                         const activeQ = questions.find(q => q.id === room.current_question_id);
                         if (!activeQ) return null;
-
                         return (
-                          <>
-                            {/* Información de la canción activa */}
-                            <div className="bg-zinc-950/40 p-4 rounded-2xl border border-zinc-900 flex justify-between items-start">
-                              <div className="min-w-0">
-                                <span className="text-[9px] text-neon-green font-black uppercase tracking-wider block mb-1">Canción Activa</span>
-                                <h3 className="text-base font-bold text-white leading-snug truncate">"{activeQ.song_title}"</h3>
-                                <p className="text-xs text-zinc-400 mt-0.5">
-                                  Película correcta: <span className="text-neon-green font-semibold">{activeQ.options[activeQ.correct_option_index]}</span>
-                                </p>
-                              </div>
+                          <div className="bg-zinc-950/40 p-4 rounded-2xl border border-zinc-900 space-y-3">
+                            <div>
+                              <span className="text-[9px] text-neon-green font-black uppercase tracking-wider block">Pregunta Activa en Teléfonos</span>
+                              <p className="text-xs font-bold text-white truncate">"{activeQ.song_title}"</p>
+                              <p className="text-[10px] text-zinc-400 mt-0.5">
+                                Película correcta: <span className="text-neon-green font-semibold">{activeQ.options[activeQ.correct_option_index]}</span>
+                              </p>
+                            </div>
 
+                            <div className="flex gap-2">
+                              <button
+                                onClick={async () => {
+                                  if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
+                                    playerRef.current.pauseVideo();
+                                  }
+                                  await showLeaderboard();
+                                }}
+                                disabled={loading}
+                                className="w-full bg-gradient-to-r from-neon-green to-neon-blue text-zinc-950 font-black py-2 px-3 rounded-lg hover:shadow-neon-green/20 transition cursor-pointer text-xs flex items-center justify-center gap-1.5"
+                              >
+                                Finalizar Ronda y Puntos
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
                               <button
                                 onClick={backToMusicList}
                                 disabled={loading}
-                                className="bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 text-[10px] font-bold py-1.5 px-3 rounded-lg transition cursor-pointer"
+                                className="bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 text-[10px] font-bold py-2 px-3 rounded-lg transition cursor-pointer"
                               >
-                                Cambiar Canción
+                                Quitar Pregunta
                               </button>
                             </div>
-
-                            {/* Contenedor del reproductor de YouTube */}
-                            <div className="w-full aspect-video rounded-2xl overflow-hidden border border-zinc-800 bg-black relative flex items-center justify-center">
-                              {/* Div requerido por la API de IFrame de YT */}
-                              <div id="admin-youtube-player" className="w-full h-full"></div>
-                              
-                              {!playerReady && (
-                                <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center gap-2">
-                                  <span className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-neon-green border-t-transparent"></span>
-                                  <span className="text-xs text-zinc-400 font-medium">Cargando reproductor...</span>
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Controles de reproducción */}
-                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-2">
-                              {/* Botones de reproducción */}
-                              <div className="flex items-center gap-2.5">
-                                <button
-                                  onClick={toggleMusicPlayback}
-                                  disabled={!playerReady}
-                                  className={`w-14 h-14 rounded-full flex items-center justify-center transition cursor-pointer ${
-                                    room.music_video_playing
-                                      ? 'bg-neon-red/10 text-neon-red border border-neon-red/30 hover:bg-neon-red/20'
-                                      : 'bg-neon-green/10 text-neon-green border border-neon-green/30 hover:bg-neon-green/20'
-                                  }`}
-                                >
-                                  {room.music_video_playing ? (
-                                    <Pause className="w-6 h-6 fill-current" />
-                                  ) : (
-                                    <Play className="w-6 h-6 fill-current ml-1" />
-                                  )}
-                                </button>
-
-                                <div>
-                                  <p className="text-sm font-bold text-white">
-                                    {room.music_video_playing ? 'Reproduciendo audio...' : 'Audio en pausa'}
-                                  </p>
-                                  <p className="text-xs text-zinc-400">
-                                    El audio se reproduce sincronizado en los teléfonos de los usuarios.
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Botón para detener y pasar a puntajes / leaderboard */}
-                              <div className="flex gap-2 w-full sm:w-auto">
-                                <button
-                                  onClick={async () => {
-                                    // Detener el reproductor localmente primero
-                                    if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
-                                      playerRef.current.pauseVideo();
-                                    }
-                                    await showLeaderboard();
-                                  }}
-                                  disabled={loading}
-                                  className="w-full sm:w-auto bg-gradient-to-r from-neon-green to-neon-blue text-zinc-950 font-black py-3 px-6 rounded-xl hover:shadow-neon-green/20 transition cursor-pointer flex items-center justify-center gap-1.5"
-                                >
-                                  Finalizar Ronda y Puntos
-                                  <ArrowRight className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Respuestas recibidas en tiempo real */}
-                            <div className="mt-4 pt-4 border-t border-zinc-900">
-                              <div className="flex items-center justify-between mb-2.5">
-                                <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-                                  Respuestas recibidas:
-                                </h4>
-                                <span className="text-xs font-bold text-white">
-                                  {responses.length} / {players.length}
-                                </span>
-                              </div>
-                              
-                              <div className="grid grid-cols-2 gap-2">
-                                {activeQ.options.map((opt, oIdx) => {
-                                  const count = responses.filter(r => r.selected_option === oIdx).length;
-                                  const isCorrect = oIdx === activeQ.correct_option_index;
-
-                                  return (
-                                    <div key={oIdx} className={`p-2.5 rounded-xl border flex justify-between items-center bg-zinc-950/20 ${
-                                      isCorrect ? 'border-neon-green/30 bg-neon-green/5' : 'border-zinc-900'
-                                    }`}>
-                                      <span className={`text-xs truncate ${isCorrect ? 'text-neon-green font-bold' : 'text-zinc-400'}`}>
-                                        {String.fromCharCode(65 + oIdx)}) {opt}
-                                      </span>
-                                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                                        count > 0 ? 'bg-zinc-800 text-white' : 'bg-transparent text-zinc-600'
-                                      }`}>
-                                        {count}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </>
+                          </div>
                         );
                       })()}
                     </div>
-                  )}
+
+                    {/* Columna Derecha: Listado de Canciones o Estadísticas de Respuestas (7 columnas) */}
+                    <div className="lg:col-span-7 flex flex-col gap-4 font-sans">
+                      {!room.current_question_id ? (
+                        /* LISTADO DE CANCIONES DE MÚSICA DISPONIBLES PARA LANZAR */
+                        <div className="flex flex-col h-full">
+                          <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-widest block mb-2">Seleccionar Canción</span>
+                          <div className="mb-3 relative">
+                            <input
+                              type="text"
+                              value={musicSearchQuery}
+                              onChange={(e) => setMusicSearchQuery(e.target.value)}
+                              placeholder="Buscar película o canción de Disney..."
+                              className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-neon-green focus:ring-1 focus:ring-neon-green/20 transition"
+                            />
+                            <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3" />
+                          </div>
+
+                          <div className="flex-1 overflow-y-auto max-h-[360px] space-y-2 pr-1 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                            {(() => {
+                              const musicQuestions = questions.filter(q => q.category === 'music');
+                              const filtered = musicQuestions.filter(q => 
+                                q.question_text.toLowerCase().includes(musicSearchQuery.toLowerCase()) ||
+                                (q.song_title && q.song_title.toLowerCase().includes(musicSearchQuery.toLowerCase())) ||
+                                q.options.some(opt => opt.toLowerCase().includes(musicSearchQuery.toLowerCase()))
+                              );
+
+                              return (
+                                <>
+                                  {filtered.map((q) => (
+                                    <div key={q.id} className="p-2.5 bg-zinc-950/30 border border-zinc-900 rounded-xl flex items-center justify-between hover:border-zinc-850 hover:bg-zinc-900/10 transition">
+                                      <div className="flex-1 min-w-0 pr-3">
+                                        <h4 className="text-xs font-bold text-white flex items-center gap-1.5 truncate">
+                                          <Music className="w-3 h-3 text-neon-green" />
+                                          {q.song_title || 'Canción sin título'}
+                                        </h4>
+                                        <p className="text-[10px] text-zinc-400 mt-0.5 truncate">
+                                          Película correcta: <span className="text-neon-green font-semibold">{q.options[q.correct_option_index]}</span>
+                                        </p>
+                                        <p className="text-[9px] text-zinc-500 font-mono mt-0.5">
+                                          Segundo de inicio: {q.video_start_seconds}s
+                                        </p>
+                                      </div>
+                                      
+                                      <button
+                                        onClick={() => launchMusicQuestion(q)}
+                                        disabled={loading}
+                                        className="bg-neon-green/10 hover:bg-neon-green/20 text-neon-green border border-neon-green/30 hover:border-neon-green font-bold text-[10px] py-1.5 px-3 rounded-lg transition cursor-pointer flex items-center gap-1 shrink-0"
+                                      >
+                                        Lanzar a teléfonos
+                                      </button>
+                                    </div>
+                                  ))}
+
+                                  {filtered.length === 0 && (
+                                    <div className="text-center py-8 text-zinc-600">
+                                      <Music className="w-8 h-8 mx-auto mb-1.5 opacity-20" />
+                                      <p className="text-xs font-semibold">No se encontraron canciones.</p>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      ) : (
+                        /* RESPUESTAS RECIBIDAS EN TIEMPO REAL */
+                        (() => {
+                          const activeQ = questions.find(q => q.id === room.current_question_id);
+                          if (!activeQ) return null;
+                          return (
+                            <div className="flex flex-col justify-between h-full bg-zinc-950/20 border border-zinc-900 rounded-2xl p-4">
+                              <div>
+                                <div className="flex items-center justify-between mb-3">
+                                  <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                                    Respuestas recibidas:
+                                  </h4>
+                                  <span className="text-xs font-bold text-white font-mono bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-md">
+                                    {responses.length} / {players.length}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-2">
+                                  {activeQ.options.map((opt, oIdx) => {
+                                    const count = responses.filter(r => r.selected_option === oIdx).length;
+                                    const isCorrect = oIdx === activeQ.correct_option_index;
+
+                                    return (
+                                      <div key={oIdx} className={`p-2.5 rounded-xl border flex justify-between items-center bg-zinc-950/40 ${
+                                        isCorrect ? 'border-neon-green/30 bg-neon-green/5' : 'border-zinc-900'
+                                      }`}>
+                                        <span className={`text-xs truncate ${isCorrect ? 'text-neon-green font-bold' : 'text-zinc-400'}`}>
+                                          {String.fromCharCode(65 + oIdx)}) {opt}
+                                        </span>
+                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                          count > 0 ? 'bg-zinc-800 text-white' : 'bg-transparent text-zinc-600'
+                                        }`}>
+                                          {count}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              <div className="mt-4 text-center">
+                                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest animate-pulse">
+                                  Los jugadores están respondiendo en sus teléfonos móviles.
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })()
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
