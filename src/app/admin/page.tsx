@@ -8,6 +8,7 @@ import {
   Zap, Radio, ArrowUp, ArrowDown, Search, X, Edit2, Music, Pause
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { BINGO_SONGS } from '@/lib/bingoSongs';
 
 interface Question {
   id: string;
@@ -30,6 +31,10 @@ interface Player {
   nickname: string;
   score: number;
   buzzed_at?: string | null;
+  bingo_card?: any;
+  bingo_marked?: any;
+  bingo_called?: boolean;
+  bingo_winner?: boolean;
 }
 
 interface ResponseCount {
@@ -54,7 +59,7 @@ export default function AdminPage() {
   }, [room]);
 
   // Pestaña activa de administración de preguntas (cuando no hay sala)
-  const [activeQuestionTab, setActiveQuestionTab] = useState<'trivia' | 'buzzer' | 'music'>('trivia');
+  const [activeQuestionTab, setActiveQuestionTab] = useState<'trivia' | 'buzzer' | 'music' | 'bingo'>('trivia');
 
   // Estados para crear/editar una pregunta de trivia
   const [newQuestionText, setNewQuestionText] = useState('');
@@ -1074,6 +1079,39 @@ export default function AdminPage() {
         }
         updates.music_video_playing = room.music_video_playing || false;
         updates.music_video_time = currentTime;
+      } else if (newStatus === 'BINGO') {
+        updates.current_question_id = null;
+        updates.question_started_at = null;
+        updates.buzzer_active = false;
+        updates.buzzer_question = null;
+        updates.music_video_playing = false;
+        updates.music_video_time = 0;
+        updates.bingo_songs_played = [];
+        updates.bingo_called_by = null;
+        updates.bingo_called_card = null;
+        
+        if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
+          playerRef.current.pauseVideo();
+        }
+
+        // Reset individual player bingo states
+        await supabase
+          .from('players')
+          .update({
+            bingo_card: null,
+            bingo_marked: [],
+            bingo_called: false,
+            bingo_winner: false
+          })
+          .eq('room_id', room.id);
+        
+        setPlayers(prev => prev.map(p => ({
+          ...p,
+          bingo_card: null,
+          bingo_marked: [],
+          bingo_called: false,
+          bingo_winner: false
+        })));
       }
 
       const { data, error } = await supabase
@@ -1087,7 +1125,7 @@ export default function AdminPage() {
       setRoom(data);
       
       // Limpiar pulsaciones de jugadores al cambiar de modo
-      if (newStatus === 'BUZZER' || newStatus === 'LOBBY' || newStatus === 'MUSIC') {
+      if (newStatus === 'BUZZER' || newStatus === 'LOBBY' || newStatus === 'MUSIC' || newStatus === 'BINGO') {
         await supabase
           .from('players')
           .update({ buzzed_at: null })
@@ -1313,7 +1351,198 @@ export default function AdminPage() {
     };
   };
 
+  // Sacar canción de bingo
+  const drawBingoSong = async () => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      const played = room.bingo_songs_played || [];
+      if (played.length >= BINGO_SONGS.length) {
+        alert('¡Todas las canciones han sido cantadas/tocadas!');
+        return;
+      }
+
+      const availableSongs = BINGO_SONGS.filter(
+        song => !played.some((pSong: any) => pSong.title === song.title)
+      );
+
+      if (availableSongs.length === 0) {
+        alert('No quedan canciones disponibles.');
+        return;
+      }
+
+      const randomIndex = Math.floor(Math.random() * availableSongs.length);
+      const chosenSong = availableSongs[randomIndex];
+
+      const updatedPlayed = [...played, chosenSong];
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          bingo_songs_played: updatedPlayed
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+
+      // Reproducir sonido al sacar canción
+      try {
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.25);
+      } catch (e) {}
+
+    } catch (err: any) {
+      alert('Error al sacar canción de bingo: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Validar el Bingo de un jugador
+  const validateBingo = async (winnerId: string) => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      // 1. Marcar al jugador como ganador del bingo
+      const { error: pError } = await supabase
+        .from('players')
+        .update({ bingo_winner: true })
+        .eq('id', winnerId);
+      
+      if (pError) throw pError;
+
+      // 2. Darle puntos de bonificación (por ejemplo, 1000 puntos por ganar Bingo)
+      const winnerPlayer = players.find(p => p.id === winnerId);
+      if (winnerPlayer) {
+        const newScore = winnerPlayer.score + 1000;
+        await supabase
+          .from('players')
+          .update({ score: newScore, bingo_winner: true })
+          .eq('id', winnerId);
+        
+        setPlayers(prev => prev.map(p => p.id === winnerId ? { ...p, score: newScore, bingo_winner: true } : p));
+      }
+
+      // 3. Cambiar el estado de la sala a 'FINISHED' para mostrar la pantalla final de celebración
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          status: 'FINISHED',
+          bingo_called_by: null,
+          bingo_called_card: null
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      setRoom(data);
+      triggerCelebration();
+
+    } catch (err: any) {
+      alert('Error al validar el Bingo: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Rechazar el Bingo de un jugador
+  const rejectBingo = async (playerId: string) => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      // 1. Resetear el estado bingo_called del jugador a false
+      const { error: pError } = await supabase
+        .from('players')
+        .update({ bingo_called: false })
+        .eq('id', playerId);
+      
+      if (pError) throw pError;
+
+      // 2. Limpiar la llamada en la sala
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          bingo_called_by: null,
+          bingo_called_card: null
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      setRoom(data);
+
+      // Actualizar la lista local de jugadores
+      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, bingo_called: false } : p));
+
+      alert('El Bingo fue rechazado y el juego continúa.');
+    } catch (err: any) {
+      alert('Error al rechazar el Bingo: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reiniciar la partida de Bingo
+  const restartBingo = async () => {
+    if (!room) return;
+    if (!confirm('¿Estás seguro de que deseas reiniciar la partida de Bingo? Se limpiarán las canciones jugadas y los cartones.')) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          bingo_songs_played: [],
+          bingo_called_by: null,
+          bingo_called_card: null
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+
+      // Resetear jugadores
+      await supabase
+        .from('players')
+        .update({
+          bingo_card: null,
+          bingo_marked: [],
+          bingo_called: false,
+          bingo_winner: false
+        })
+        .eq('room_id', room.id);
+
+      setPlayers(prev => prev.map(p => ({
+        ...p,
+        bingo_card: null,
+        bingo_marked: [],
+        bingo_called: false,
+        bingo_winner: false
+      })));
+
+      alert('Partida de Bingo reiniciada correctamente.');
+    } catch (err: any) {
+      alert('Error al reiniciar el Bingo: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const activeQuestion = questions[currentQuestionIndex];
+
 
   return (
     <div className="flex flex-col flex-1 min-h-screen p-6 md:p-12 relative overflow-hidden">
@@ -1347,33 +1576,45 @@ export default function AdminPage() {
           )}
           
           {room && (
-            <div className="flex items-center gap-2">
-              {(room.status === 'BUZZER' || room.status === 'MUSIC') ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {room.status !== 'LOBBY' && (
                 <button
                   onClick={() => changeRoomStatus('LOBBY')}
                   disabled={loading}
-                  className="bg-neon-blue/15 hover:bg-neon-blue/25 text-neon-blue border border-neon-blue/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                  className="bg-neon-blue/15 hover:bg-neon-blue/25 text-neon-blue border border-neon-blue/30 text-xs font-semibold py-2 px-3 rounded-lg transition flex items-center gap-1 cursor-pointer"
                 >
                   <Trophy className="w-3.5 h-3.5" /> Volver a Trivia
                 </button>
-              ) : (
-                <>
-                  <button
-                    onClick={() => changeRoomStatus('MUSIC')}
-                    disabled={loading}
-                    className="bg-neon-green/15 hover:bg-neon-green/25 text-neon-green border border-neon-green/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Music className="w-3.5 h-3.5 animate-pulse" /> Adivina la Canción
-                  </button>
+              )}
+              
+              {room.status !== 'MUSIC' && (
+                <button
+                  onClick={() => changeRoomStatus('MUSIC')}
+                  disabled={loading}
+                  className="bg-neon-green/15 hover:bg-neon-green/25 text-neon-green border border-neon-green/30 text-xs font-semibold py-2 px-3 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                >
+                  <Music className="w-3.5 h-3.5 animate-pulse" /> Adivina la Canción
+                </button>
+              )}
 
-                  <button
-                    onClick={() => changeRoomStatus('BUZZER')}
-                    disabled={loading}
-                    className="bg-neon-pink/15 hover:bg-neon-pink/25 text-neon-pink border border-neon-pink/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Zap className="w-3.5 h-3.5 animate-pulse" /> Modo Pulsador
-                  </button>
-                </>
+              {room.status !== 'BUZZER' && (
+                <button
+                  onClick={() => changeRoomStatus('BUZZER')}
+                  disabled={loading}
+                  className="bg-neon-pink/15 hover:bg-neon-pink/25 text-neon-pink border border-neon-pink/30 text-xs font-semibold py-2 px-3 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                >
+                  <Zap className="w-3.5 h-3.5 animate-pulse" /> Modo Pulsador
+                </button>
+              )}
+
+              {room.status !== 'BINGO' && (
+                <button
+                  onClick={() => changeRoomStatus('BINGO')}
+                  disabled={loading}
+                  className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 text-xs font-semibold py-2 px-3 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                >
+                  <Radio className="w-3.5 h-3.5 animate-pulse" /> Bingo Musical
+                </button>
               )}
               
               <button
@@ -1432,21 +1673,21 @@ export default function AdminPage() {
             <div className="lg:col-span-7 flex flex-col gap-6 w-full font-sans">
               
               {/* SELECTOR DE PESTAÑAS */}
-              <div className="flex gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl">
+              <div className="flex flex-wrap gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl">
                 <button
                   type="button"
                   onClick={() => {
                     setActiveQuestionTab('trivia');
                     cancelEditing();
                   }}
-                  className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                  className={`flex-1 min-w-[90px] py-2 px-3 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer border ${
                     activeQuestionTab === 'trivia'
                       ? 'bg-neon-blue/10 text-neon-blue border-neon-blue/30 shadow-sm shadow-neon-blue/5'
                       : 'text-zinc-400 hover:text-white border-transparent'
                   }`}
                 >
-                  <Trophy className="w-3.5 h-3.5" />
-                  Preguntas de Trivia
+                  <Trophy className="w-3 h-3" />
+                  Trivia
                 </button>
                 <button
                   type="button"
@@ -1454,14 +1695,14 @@ export default function AdminPage() {
                     setActiveQuestionTab('music');
                     cancelEditing();
                   }}
-                  className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                  className={`flex-1 min-w-[90px] py-2 px-3 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer border ${
                     activeQuestionTab === 'music'
                       ? 'bg-neon-green/10 text-neon-green border-neon-green/30 shadow-sm shadow-neon-green/5'
                       : 'text-zinc-400 hover:text-white border-transparent'
                   }`}
                 >
-                  <Music className="w-3.5 h-3.5" />
-                  Adivina la Canción
+                  <Music className="w-3 h-3" />
+                  Música
                 </button>
                 <button
                   type="button"
@@ -1469,14 +1710,29 @@ export default function AdminPage() {
                     setActiveQuestionTab('buzzer');
                     cancelEditing();
                   }}
-                  className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                  className={`flex-1 min-w-[90px] py-2 px-3 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer border ${
                     activeQuestionTab === 'buzzer'
                       ? 'bg-neon-pink/10 text-neon-pink border-neon-pink/30 shadow-sm shadow-neon-pink/5'
                       : 'text-zinc-400 hover:text-white border-transparent'
                   }`}
                 >
-                  <Zap className="w-3.5 h-3.5" />
-                  Preguntas de Pulsador
+                  <Zap className="w-3 h-3" />
+                  Pulsador
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveQuestionTab('bingo');
+                    cancelEditing();
+                  }}
+                  className={`flex-1 min-w-[90px] py-2 px-3 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer border ${
+                    activeQuestionTab === 'bingo'
+                      ? 'bg-amber-500/10 text-amber-500 border-amber-500/30 shadow-sm shadow-amber-500/5'
+                      : 'text-zinc-400 hover:text-white border-transparent'
+                  }`}
+                >
+                  <Radio className="w-3 h-3" />
+                  Bingo (45)
                 </button>
               </div>
 
@@ -1693,7 +1949,7 @@ export default function AdminPage() {
                     })()}
                   </div>
                 </>
-              ) : (
+              ) : activeQuestionTab === 'buzzer' ? (
                 <>
                   {/* CREAR PREGUNTA PULSADOR */}
                   <div id="question-form-container" className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20">
@@ -1715,23 +1971,23 @@ export default function AdminPage() {
                       <div>
                         <label className="text-xs text-zinc-400 font-semibold block mb-1">Texto de la Pregunta</label>
                         <input 
-                          type="text"
-                          value={newBuzzerQuestionText}
-                          onChange={(e) => setNewBuzzerQuestionText(e.target.value)}
-                          placeholder="Ej: ¿Cuál es la capital de Italia?"
-                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
-                          required
+                           type="text"
+                           value={newBuzzerQuestionText}
+                           onChange={(e) => setNewBuzzerQuestionText(e.target.value)}
+                           placeholder="Ej: ¿Cuál es la capital de Italia?"
+                           className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
+                           required
                         />
                       </div>
                       
                       <div>
                         <label className="text-xs text-zinc-400 font-semibold block mb-1">Respuesta Correcta (Opcional - Como guía para el administrador)</label>
                         <input 
-                          type="text"
-                          value={newBuzzerAnswerText}
-                          onChange={(e) => setNewBuzzerAnswerText(e.target.value)}
-                          placeholder="Ej: Roma"
-                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
+                           type="text"
+                           value={newBuzzerAnswerText}
+                           onChange={(e) => setNewBuzzerAnswerText(e.target.value)}
+                           placeholder="Ej: Roma"
+                           className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
                         />
                       </div>
 
@@ -1837,6 +2093,32 @@ export default function AdminPage() {
                           <p className="text-xs">No hay preguntas de pulsador cargadas en la base de datos.</p>
                         </div>
                       )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* LISTA DE CANCIONES DE BINGO */}
+                  <div className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20 max-h-[500px] overflow-hidden flex flex-col">
+                    <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+                      <Radio className="w-5 h-5 text-amber-500 animate-pulse" />
+                      Lista de Canciones de Bingo ({BINGO_SONGS.length})
+                    </h3>
+                    <p className="text-zinc-400 text-xs mb-4">
+                      Estas son las 45 canciones seleccionadas para el Bingo Musical. Los cartones de los jugadores se generarán automáticamente a partir de esta lista.
+                    </p>
+                    <div className="flex-1 overflow-y-auto space-y-2.5 pr-2 scrollbar-thin scrollbar-thumb-zinc-850 scrollbar-track-transparent">
+                      {BINGO_SONGS.map((song, idx) => (
+                        <div key={idx} className="p-3 bg-zinc-950/40 border border-zinc-900 rounded-xl flex items-center gap-3">
+                          <span className="w-6 h-6 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center font-mono font-bold text-xs text-zinc-500 shrink-0">
+                            {idx + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white truncate">{song.title}</p>
+                            <p className="text-xs text-zinc-500 truncate">{song.artist}</p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </>
@@ -2833,6 +3115,238 @@ export default function AdminPage() {
                 </div>
               </div>
 
+              {/* MODO BINGO */}
+              {room.status === 'BINGO' && (
+                <div className="glass-panel p-6 rounded-3xl border-zinc-800 flex-1 flex flex-col min-h-[480px]">
+                  <div className="flex flex-wrap items-center justify-between pb-4 border-b border-zinc-800 mb-6 gap-4">
+                    <div>
+                      <h2 className="text-xl font-black text-white flex items-center gap-2">
+                        <Radio className="w-5 h-5 text-amber-500 animate-pulse" />
+                        Bingo Musical
+                      </h2>
+                      <p className="text-xs text-zinc-400">Saca canciones y valida los cartones de los jugadores en tiempo real</p>
+                    </div>
+                    <button
+                      onClick={restartBingo}
+                      className="px-3.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 font-bold border border-amber-500/20 rounded-xl text-xs transition cursor-pointer"
+                    >
+                      Reiniciar Bingo
+                    </button>
+                  </div>
+
+                  {/* Panel de Validación Prioritario: Si alguien cantó Bingo */}
+                  {(() => {
+                    const playerWhoCalled = players.find(p => p.bingo_called);
+                    if (!playerWhoCalled) return null;
+
+                    const played = room.bingo_songs_played || [];
+                    const card = playerWhoCalled.bingo_card || [];
+                    const marked = playerWhoCalled.bingo_marked || [];
+
+                    return (
+                      <div className="mb-6 p-6 rounded-2xl bg-amber-500/10 border-2 border-amber-500/50 shadow-lg shadow-amber-500/10 relative overflow-hidden animate-pulse-glow">
+                        <div className="absolute top-0 right-0 p-2 bg-amber-500 text-zinc-950 text-xs font-black rounded-bl-xl uppercase tracking-wider">
+                          ¡BINGO CANTADO!
+                        </div>
+                        <h3 className="text-xl font-black text-white mb-2 flex items-center gap-2">
+                          🏆 {playerWhoCalled.nickname} ha cantado Bingo!
+                        </h3>
+                        <p className="text-xs text-zinc-300 mb-4">
+                          Verifica las canciones marcadas en su cartón de 3x3. Las canciones marcadas que ya han sonado se muestran con ✓. Si hay alguna marca roja, significa que no ha sonado.
+                        </p>
+
+                        <div className="max-w-md mx-auto grid grid-cols-3 gap-3 mb-6">
+                          {card.map((song: any, idx: number) => {
+                            const isMarked = marked.includes(idx);
+                            const hasPlayed = played.some((pSong: any) => pSong.title === song.title);
+                            const isValidMark = isMarked && hasPlayed;
+                            const isInvalidMark = isMarked && !hasPlayed;
+
+                            return (
+                              <div
+                                key={idx}
+                                className={`p-2.5 rounded-xl border text-center flex flex-col justify-between min-h-[90px] transition ${
+                                  isValidMark
+                                    ? 'border-neon-green bg-neon-green/10 text-white'
+                                    : isInvalidMark
+                                    ? 'border-neon-red bg-neon-red/10 text-white'
+                                    : isMarked
+                                    ? 'border-amber-500 bg-amber-500/10'
+                                    : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                                }`}
+                              >
+                                <span className="text-[9px] font-mono text-zinc-500 block mb-1">
+                                  #{idx + 1}
+                                </span>
+                                <p className="text-[10px] font-bold leading-snug line-clamp-2 truncate-lines">
+                                  {song.title}
+                                </p>
+                                <div className="mt-1 shrink-0 flex items-center justify-center">
+                                  {isValidMark ? (
+                                    <span className="text-[9px] bg-neon-green text-zinc-950 px-1.5 py-0.5 rounded font-black">
+                                      ✓ Sonó
+                                    </span>
+                                  ) : isInvalidMark ? (
+                                    <span className="text-[9px] bg-neon-red text-white px-1.5 py-0.5 rounded font-black animate-pulse">
+                                      ✗ No sonó
+                                    </span>
+                                  ) : isMarked ? (
+                                    <span className="text-[9px] bg-amber-500 text-zinc-950 px-1.5 py-0.5 rounded font-black">
+                                      Marcada
+                                    </span>
+                                  ) : (
+                                    <span className="text-[8px] text-zinc-600 font-medium">
+                                      No marcada
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex justify-center gap-3">
+                          <button
+                            onClick={() => validateBingo(playerWhoCalled.id)}
+                            disabled={loading}
+                            className="bg-neon-green text-zinc-950 font-black px-6 py-3 rounded-xl hover:shadow-neon-green/30 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
+                          >
+                            ✓ Validar y Declarar Ganador
+                          </button>
+                          <button
+                            onClick={() => rejectBingo(playerWhoCalled.id)}
+                            disabled={loading}
+                            className="bg-zinc-900 border border-zinc-800 text-neon-red font-bold px-6 py-3 rounded-xl hover:bg-zinc-850 active:scale-95 transition cursor-pointer"
+                          >
+                            ✗ Rechazar y Continuar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Columna Izquierda: Panel de Sorteo (4 columnas) */}
+                    <div className="lg:col-span-4 flex flex-col gap-4 font-sans border-r border-zinc-900/50 pr-0 lg:pr-6">
+                      <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-widest block">Acciones del Bingo</span>
+
+                      {/* Botón Sacar Canción */}
+                      <button
+                        onClick={drawBingoSong}
+                        disabled={loading}
+                        className="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 font-black py-4 rounded-xl shadow-lg hover:shadow-amber-500/20 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2 text-lg animate-pulse-glow"
+                      >
+                        {loading ? (
+                          <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-zinc-950 border-t-transparent"></span>
+                        ) : (
+                          <>
+                            <Play className="w-5 h-5 fill-zinc-950" />
+                            Sacar Siguiente Canción
+                          </>
+                        )}
+                      </button>
+
+                      {/* Canción Recién Sacada (Drawn) */}
+                      {(() => {
+                        const played = room.bingo_songs_played || [];
+                        if (played.length === 0) {
+                          return (
+                            <div className="bg-zinc-950/40 p-6 rounded-2xl border border-zinc-900 flex-1 flex flex-col justify-center items-center text-center text-zinc-500 gap-2 min-h-[160px]">
+                              <Radio className="w-8 h-8 opacity-20 text-amber-500 animate-pulse" />
+                              <p className="text-xs">¡Listos para jugar! Haz clic en "Sacar Siguiente Canción" para empezar.</p>
+                            </div>
+                          );
+                        }
+                        const lastSong = played[played.length - 1];
+                        return (
+                          <div className="bg-amber-500/5 p-6 rounded-2xl border border-amber-500/20 text-center flex-1 flex flex-col justify-center items-center relative overflow-hidden min-h-[160px]">
+                            <div className="absolute -top-6 -right-6 w-20 h-20 bg-amber-500/5 rounded-full blur-xl"></div>
+                            <span className="text-[10px] text-amber-500 font-black uppercase tracking-widest block mb-2">Última canción cantada</span>
+                            <h3 className="text-2xl font-black text-white leading-tight mb-1 neon-glow-yellow">
+                              {lastSong.title}
+                            </h3>
+                            <p className="text-sm text-zinc-400 font-medium">
+                              {lastSong.artist}
+                            </p>
+                            <span className="mt-4 text-[10px] bg-zinc-900 text-zinc-500 font-mono px-2 py-0.5 rounded border border-zinc-800 font-bold">
+                              Canción #{played.length} de {BINGO_SONGS.length}
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Historial de canciones jugadas */}
+                      <div className="flex flex-col h-[200px]">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block mb-2">Historial de Sorteo</span>
+                        <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-zinc-850 scrollbar-track-transparent bg-zinc-950/20 border border-zinc-900 p-2.5 rounded-xl">
+                          {(() => {
+                            const played = [...(room.bingo_songs_played || [])].reverse();
+                            if (played.length === 0) {
+                              return <p className="text-[10px] text-zinc-600 text-center py-8">Ninguna canción sorteada aún.</p>;
+                            }
+                            return played.map((song: any, index: number) => {
+                              const songIndex = room.bingo_songs_played.length - index;
+                              return (
+                                <div key={index} className="p-2 bg-zinc-950/40 border border-zinc-900/60 rounded-lg flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-white truncate">{song.title}</p>
+                                    <p className="text-[10px] text-zinc-500 truncate">{song.artist}</p>
+                                  </div>
+                                  <span className="text-[9px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono font-bold shrink-0">
+                                    #{songIndex}
+                                  </span>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Columna Derecha: Vista general de las 45 canciones (8 columnas) */}
+                    <div className="lg:col-span-8 flex flex-col gap-3 font-sans">
+                      <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-widest block">Tablero General ({BINGO_SONGS.length} Canciones)</span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 overflow-y-auto max-h-[460px] pr-1 scrollbar-thin scrollbar-thumb-zinc-850 scrollbar-track-transparent">
+                        {BINGO_SONGS.map((song, idx) => {
+                          const played = room.bingo_songs_played || [];
+                          const hasPlayed = played.some((pSong: any) => pSong.title === song.title);
+                          const playedOrder = played.findIndex((pSong: any) => pSong.title === song.title) + 1;
+
+                          return (
+                            <div
+                              key={idx}
+                              className={`p-2.5 rounded-xl border flex flex-col justify-between min-h-[75px] transition ${
+                                hasPlayed
+                                  ? 'border-amber-500 bg-amber-500/5 text-white shadow-sm shadow-amber-500/5'
+                                  : 'border-zinc-900 bg-zinc-950/40 text-zinc-500'
+                              }`}
+                            >
+                              <div className="flex justify-between items-start gap-1 shrink-0">
+                                <span className={`text-[9px] font-mono font-bold shrink-0 ${hasPlayed ? 'text-amber-500' : 'text-zinc-600'}`}>
+                                  {idx + 1}
+                                </span>
+                                {hasPlayed && (
+                                  <span className="text-[8px] bg-amber-500 text-zinc-950 px-1 py-0.2 rounded font-black shrink-0">
+                                    #{playedOrder}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1 flex flex-col justify-center mt-1">
+                                <p className={`text-[11px] font-bold leading-tight truncate ${hasPlayed ? 'text-white' : 'text-zinc-400'}`}>
+                                  {song.title}
+                                </p>
+                                <p className="text-[9px] text-zinc-500 truncate leading-none mt-0.5">
+                                  {song.artist}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* LISTA DE JUGADORES (DERECHA - 1 COLUMNA) */}

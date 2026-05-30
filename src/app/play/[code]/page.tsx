@@ -8,6 +8,7 @@ import {
   Sparkles, HelpCircle, LogOut, AlertTriangle, Radio, Zap, Music
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { BINGO_SONGS } from '@/lib/bingoSongs';
 
 interface Question {
   id: string;
@@ -21,6 +22,10 @@ interface Player {
   nickname: string;
   score: number;
   buzzed_at?: string | null;
+  bingo_card?: any[] | null;
+  bingo_marked?: number[] | null;
+  bingo_called?: boolean;
+  bingo_winner?: boolean;
 }
 
 export default function PlayPage({ params }: { params: Promise<{ code: string }> }) {
@@ -54,6 +59,15 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
   const [roomBuzzerActive, setRoomBuzzerActive] = useState(false);
   const [roomBuzzerQuestion, setRoomBuzzerQuestion] = useState('');
   const [pressingBuzzer, setPressingBuzzer] = useState(false);
+
+  // Estados para Bingo
+  const [bingoCard, setBingoCard] = useState<any[] | null>(null);
+  const [bingoMarked, setBingoMarked] = useState<number[]>([]);
+  const [bingoCalled, setBingoCalled] = useState(false);
+  const [bingoWinner, setBingoWinner] = useState(false);
+  const [bingoSongsPlayed, setBingoSongsPlayed] = useState<any[]>([]);
+  const [submittingBingoCall, setSubmittingBingoCall] = useState(false);
+  const cardGeneratingRef = useRef(false);
 
 
 
@@ -103,6 +117,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
           setQuestionStartedAt(updatedRoom.question_started_at);
           setRoomBuzzerActive(updatedRoom.buzzer_active || false);
           setRoomBuzzerQuestion(updatedRoom.buzzer_question || '');
+          setBingoSongsPlayed(updatedRoom.bingo_songs_played || []);
 
           if ((updatedRoom.status === 'QUESTION' || updatedRoom.status === 'MUSIC') && updatedRoom.current_question_id) {
             // Se lanzó una nueva pregunta/canción: resetear estados locales y cargarla
@@ -140,7 +155,21 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
           if (payload.eventType === 'DELETE') {
             setErrorMsg('Has sido desconectado o eliminado de la sala.');
           } else if (payload.eventType === 'UPDATE') {
-            setMyPlayerInfo(payload.new as Player);
+            const updatedPlayer = payload.new as Player;
+            setMyPlayerInfo(updatedPlayer);
+            setBingoCard(updatedPlayer.bingo_card || null);
+            setBingoMarked(updatedPlayer.bingo_marked || []);
+            setBingoCalled(updatedPlayer.bingo_called || false);
+            setBingoWinner(updatedPlayer.bingo_winner || false);
+
+            if (updatedPlayer.bingo_winner) {
+              // Confeti continuo para el ganador
+              confetti({
+                particleCount: 100,
+                spread: 70,
+                origin: { y: 0.6 }
+              });
+            }
           }
         }
       )
@@ -199,6 +228,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         setQuestionStartedAt(roomData.question_started_at);
         setRoomBuzzerActive(roomData.buzzer_active || false);
         setRoomBuzzerQuestion(roomData.buzzer_question || '');
+        setBingoSongsPlayed(roomData.bingo_songs_played || []);
  
         if ((roomData.status === 'QUESTION' || roomData.status === 'MUSIC') && roomData.current_question_id) {
           await fetchQuestion(roomData.current_question_id);
@@ -219,6 +249,10 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
  
       if (playerData) {
         setMyPlayerInfo(playerData);
+        setBingoCard(playerData.bingo_card || null);
+        setBingoMarked(playerData.bingo_marked || []);
+        setBingoCalled(playerData.bingo_called || false);
+        setBingoWinner(playerData.bingo_winner || false);
       }
     } catch (err) {
       console.error('Error al inicializar sesión:', err);
@@ -415,6 +449,101 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
       console.error(err);
     } finally {
       setPressingBuzzer(false);
+    }
+  };
+
+  // Genera y guarda un cartón de bingo aleatorio para el jugador
+  const generateAndSaveBingoCard = async (pId: string) => {
+    if (cardGeneratingRef.current) return;
+    cardGeneratingRef.current = true;
+    
+    // Mezclar las 45 canciones y tomar 9
+    const shuffled = [...BINGO_SONGS].sort(() => Math.random() - 0.5);
+    const card = shuffled.slice(0, 9);
+
+    try {
+      const { data, error } = await supabase
+        .from('players')
+        .update({
+          bingo_card: card,
+          bingo_marked: [],
+          bingo_called: false,
+          bingo_winner: false
+        })
+        .eq('id', pId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setBingoCard(data.bingo_card);
+        setBingoMarked([]);
+        setBingoCalled(false);
+        setBingoWinner(false);
+      }
+    } catch (err) {
+      console.error('Error generating bingo card:', err);
+    } finally {
+      cardGeneratingRef.current = false;
+    }
+  };
+
+  // Generar cartón automáticamente si el modo es BINGO y el jugador no tiene uno
+  useEffect(() => {
+    if (roomStatus === 'BINGO' && playerId && !bingoCard && !cardGeneratingRef.current) {
+      generateAndSaveBingoCard(playerId);
+    }
+  }, [roomStatus, playerId, bingoCard]);
+
+  // Alternar celdas marcadas en el cartón de Bingo
+  const toggleBingoMark = async (index: number) => {
+    if (!playerId || !bingoCard || bingoCalled || bingoWinner) return;
+
+    let updatedMarks = [...bingoMarked];
+    if (updatedMarks.includes(index)) {
+      updatedMarks = updatedMarks.filter(idx => idx !== index);
+    } else {
+      updatedMarks.push(index);
+    }
+
+    setBingoMarked(updatedMarks);
+
+    try {
+      await supabase
+        .from('players')
+        .update({ bingo_marked: updatedMarks })
+        .eq('id', playerId);
+    } catch (err) {
+      console.error('Error updating marked cells:', err);
+    }
+  };
+
+  // Declarar o Cantar Bingo
+  const callBingo = async () => {
+    if (!playerId || !roomId || bingoCalled || bingoWinner || submittingBingoCall) return;
+    setSubmittingBingoCall(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('players')
+        .update({ bingo_called: true })
+        .eq('id', playerId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setBingoCalled(true);
+        confetti({
+          particleCount: 50,
+          spread: 60,
+          origin: { y: 0.8 }
+        });
+      }
+    } catch (err: any) {
+      alert('Error al cantar Bingo: ' + err.message);
+    } finally {
+      setSubmittingBingoCall(false);
     }
   };
 
@@ -906,6 +1035,157 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                     </span>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============================================================
+            8. PANTALLA: MODO BINGO
+            ============================================================ */}
+        {roomStatus === 'BINGO' && (
+          <div className="w-full flex-1 flex flex-col justify-between py-2 min-h-[460px]">
+            {!bingoCard ? (
+              <div className="w-full glass-panel p-8 rounded-3xl border-zinc-800 text-center my-auto animate-float">
+                <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 rounded-full mx-auto mb-4 flex items-center justify-center">
+                  <Radio className="w-8 h-8 text-amber-500 animate-spin" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Generando Cartón</h3>
+                <p className="text-zinc-400 text-sm">
+                  Cargando tus 9 canciones de la playlist...
+                </p>
+              </div>
+            ) : bingoWinner ? (
+              /* PANTALLA DE GANADOR */
+              <div className="w-full glass-panel p-8 rounded-3xl text-center my-auto flex flex-col justify-center items-center relative overflow-hidden border-2 border-amber-500/50 shadow-xl shadow-amber-500/20 animate-float">
+                <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500"></div>
+                <div className="w-20 h-20 bg-amber-500/20 border-2 border-amber-500/40 rounded-2xl mb-6 flex items-center justify-center shadow-lg shadow-amber-500/20 animate-bounce">
+                  <Trophy className="w-12 h-12 text-amber-400 fill-amber-400/20" />
+                </div>
+                <span className="text-[10px] text-amber-400 font-extrabold uppercase tracking-widest block mb-1">¡Felicitaciones!</span>
+                <h2 className="text-3xl font-black text-white tracking-tight mb-2 neon-glow-yellow">¡BINGO GANADO!</h2>
+                <p className="text-zinc-300 text-sm mb-6 max-w-xs leading-relaxed">
+                  El administrador ha validado tu cartón. ¡Eres el campeón indiscutible de esta ronda de Bingo Musical!
+                </p>
+                <div className="bg-zinc-950/60 border border-zinc-900 rounded-2xl py-3 px-6 text-center font-bold text-xs text-zinc-400">
+                  Total de canciones marcadas: <strong className="text-amber-400 font-mono text-sm">{bingoMarked.length} / 9</strong>
+                </div>
+              </div>
+            ) : (
+              /* CARTÓN DE JUEGO ACTIVO */
+              <div className="w-full flex flex-col flex-1 justify-between gap-4">
+                {/* Header de Info */}
+                <div className="text-center">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-500 block mb-1.5">
+                    Bingo Musical
+                  </span>
+                  
+                  {/* Última canción sorteada */}
+                  {(() => {
+                    const played = bingoSongsPlayed || [];
+                    if (played.length === 0) {
+                      return (
+                        <div className="py-2.5 px-4 bg-zinc-950/40 border border-zinc-900 rounded-xl text-center text-xs text-zinc-500">
+                          Esperando el sorteo de la primera canción...
+                        </div>
+                      );
+                    }
+                    const lastSong = played[played.length - 1];
+                    return (
+                      <div className="py-3 px-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center relative overflow-hidden">
+                        <span className="text-[8px] text-amber-500 font-black uppercase tracking-wider block mb-0.5">Última canción que sonó:</span>
+                        <p className="text-sm font-black text-white truncate leading-tight font-sans">"{lastSong.title}"</p>
+                        <p className="text-[10px] text-zinc-400 truncate leading-none mt-0.5">{lastSong.artist}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Instrucción */}
+                <p className="text-[10px] text-zinc-400 text-center font-medium">
+                  Marca las canciones de tu cartón a medida que vayan sonando. Haz clic en una celda para marcarla.
+                </p>
+
+                {/* Tablero 3x3 */}
+                <div className="grid grid-cols-3 gap-2.5 my-1">
+                  {bingoCard.map((song: any, idx: number) => {
+                    const isMarked = bingoMarked.includes(idx);
+                    const hasPlayed = bingoSongsPlayed.some(s => s.title === song.title);
+                    
+                    // Colores de la celda
+                    let cellClass = 'border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-750';
+                    let statusText = null;
+
+                    if (isMarked) {
+                      if (hasPlayed) {
+                        cellClass = 'border-neon-green bg-neon-green/10 text-white font-extrabold shadow-sm shadow-neon-green/5';
+                        statusText = '✓ Sonó';
+                      } else {
+                        cellClass = 'border-amber-500 bg-amber-500/10 text-white font-extrabold';
+                        statusText = 'Marcada';
+                      }
+                    }
+
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => toggleBingoMark(idx)}
+                        disabled={bingoCalled || bingoWinner}
+                        className={`p-2 rounded-2xl border text-center flex flex-col justify-between min-h-[95px] active:scale-95 transition-all duration-100 cursor-pointer disabled:cursor-not-allowed select-none ${cellClass}`}
+                        style={{ touchAction: 'manipulation' }}
+                      >
+                        <span className="text-[8px] font-mono text-zinc-600 block mb-1">
+                          #{idx + 1}
+                        </span>
+                        <p className="text-[10px] font-bold leading-tight line-clamp-3 mb-1 break-words">
+                          {song.title}
+                        </p>
+                        <div className="mt-auto shrink-0 flex items-center justify-center">
+                          {statusText ? (
+                            <span className={`text-[7.5px] px-1 py-0.2 rounded font-black uppercase tracking-wider ${
+                              hasPlayed ? 'bg-neon-green text-zinc-950' : 'bg-amber-500 text-zinc-950'
+                            }`}>
+                              {statusText}
+                            </span>
+                          ) : (
+                            <span className="text-[7px] text-zinc-700 font-medium">
+                              Sin marcar
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Botón de Cantar Bingo */}
+                <div className="mt-2 text-center">
+                  {!bingoCalled ? (
+                    <button
+                      onClick={callBingo}
+                      disabled={submittingBingoCall}
+                      className="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 font-black py-4 rounded-2xl shadow-lg hover:shadow-amber-500/20 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2 text-base animate-pulse-glow"
+                    >
+                      {submittingBingoCall ? (
+                        <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-zinc-950 border-t-transparent"></span>
+                      ) : (
+                        <>
+                          <Radio className="w-5 h-5 animate-pulse" />
+                          ¡CANTAR BINGO!
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <div className="w-full py-4 px-6 bg-zinc-950/60 border border-amber-500/30 rounded-2xl text-center text-sm font-bold text-amber-500 flex items-center justify-center gap-2 animate-pulse">
+                      <Radio className="w-4 h-4 text-amber-500 animate-ping" />
+                      Bingo Cantado - Esperando validación del Admin
+                    </div>
+                  )}
+                  
+                  <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest block mt-2">
+                    Canciones en juego: {bingoSongsPlayed.length} de {BINGO_SONGS.length}
+                  </span>
+                </div>
               </div>
             )}
           </div>
