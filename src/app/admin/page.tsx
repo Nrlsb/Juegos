@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   Users, Play, Award, RotateCcw, Volume2, Plus, 
   HelpCircle, CheckCircle, BarChart3, Trophy, ArrowRight, Trash2, ShieldAlert,
-  Zap, Radio, ArrowUp, ArrowDown, Search, X
+  Zap, Radio, ArrowUp, ArrowDown, Search, X, Edit2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -39,11 +39,12 @@ export default function AdminPage() {
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Estados para crear una nueva pregunta
+  // Estados para crear/editar una pregunta
   const [newQuestionText, setNewQuestionText] = useState('');
   const [newOptions, setNewOptions] = useState(['', '', '', '']);
   const [newCorrectIndex, setNewCorrectIndex] = useState(0);
   const [addingQuestion, setAddingQuestion] = useState(false);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
 
   // Estados para el Modo Pulsador
   const [buzzerQuestionInput, setBuzzerQuestionInput] = useState('');
@@ -246,8 +247,8 @@ export default function AdminPage() {
     setLoading(false);
   };
 
-  // Agregar una nueva pregunta a Supabase
-  const handleAddQuestion = async (e: React.FormEvent) => {
+  // Guardar (crear o actualizar) una pregunta en Supabase
+  const handleSubmitQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newQuestionText.trim() || newOptions.some(opt => !opt.trim())) {
       alert('Por favor completa el texto de la pregunta y todas las opciones.');
@@ -256,31 +257,80 @@ export default function AdminPage() {
 
     setAddingQuestion(true);
     try {
-      const { data, error } = await supabase
-        .from('questions')
-        .insert([{
-          question_text: newQuestionText.trim(),
-          options: newOptions.map(o => o.trim()),
-          correct_option_index: newCorrectIndex
-        }])
-        .select()
-        .single();
+      if (editingQuestionId) {
+        // Modo Edición
+        const { data, error } = await supabase
+          .from('questions')
+          .update({
+            question_text: newQuestionText.trim(),
+            options: newOptions.map(o => o.trim()),
+            correct_option_index: newCorrectIndex
+          })
+          .eq('id', editingQuestionId)
+          .select()
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
 
-      // Actualizar el listado local de preguntas
-      setQuestions(prev => [...prev, data]);
+        // Actualizar el listado local de preguntas
+        setQuestions(prev => prev.map(q => q.id === editingQuestionId ? data : q));
 
-      // Limpiar formulario
-      setNewQuestionText('');
-      setNewOptions(['', '', '', '']);
-      setNewCorrectIndex(0);
-      alert('¡Pregunta guardada exitosamente!');
+        // Limpiar formulario y salir de modo edición
+        setNewQuestionText('');
+        setNewOptions(['', '', '', '']);
+        setNewCorrectIndex(0);
+        setEditingQuestionId(null);
+        alert('¡Pregunta actualizada exitosamente!');
+      } else {
+        // Modo Crear
+        const { data, error } = await supabase
+          .from('questions')
+          .insert([{
+            question_text: newQuestionText.trim(),
+            options: newOptions.map(o => o.trim()),
+            correct_option_index: newCorrectIndex
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // Actualizar el listado local de preguntas
+        setQuestions(prev => [...prev, data]);
+
+        // Limpiar formulario
+        setNewQuestionText('');
+        setNewOptions(['', '', '', '']);
+        setNewCorrectIndex(0);
+        alert('¡Pregunta guardada exitosamente!');
+      }
     } catch (err: any) {
       alert('Error al guardar la pregunta: ' + err.message);
     } finally {
       setAddingQuestion(false);
     }
+  };
+
+  // Iniciar la edición de una pregunta
+  const startEditingQuestion = (q: Question) => {
+    setEditingQuestionId(q.id);
+    setNewQuestionText(q.question_text);
+    setNewOptions([...q.options]);
+    setNewCorrectIndex(q.correct_option_index);
+    
+    // Hacer scroll suave hacia el formulario en móviles
+    const formElement = document.getElementById('question-form-container');
+    if (formElement) {
+      formElement.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  // Cancelar la edición
+  const cancelEditing = () => {
+    setEditingQuestionId(null);
+    setNewQuestionText('');
+    setNewOptions(['', '', '', '']);
+    setNewCorrectIndex(0);
   };
 
   // Eliminar una pregunta de Supabase
@@ -297,6 +347,11 @@ export default function AdminPage() {
 
       // Actualizar el estado local
       setQuestions(prev => prev.filter(q => q.id !== id));
+
+      // Si se estaba editando la pregunta que se eliminó, cancelamos edición
+      if (editingQuestionId === id) {
+        cancelEditing();
+      }
     } catch (err: any) {
       alert('Error al eliminar la pregunta: ' + err.message);
     }
@@ -864,13 +919,22 @@ export default function AdminPage() {
             <div className="lg:col-span-7 flex flex-col gap-6 w-full">
               
               {/* CREAR PREGUNTA */}
-              <div className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20">
+              <div id="question-form-container" className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20">
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                  <Plus className="w-5 h-5 text-neon-pink" />
-                  Agregar Nueva Pregunta
+                  {editingQuestionId ? (
+                    <>
+                      <Edit2 className="w-5 h-5 text-neon-blue" />
+                      Editar Pregunta
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-5 h-5 text-neon-pink" />
+                      Agregar Nueva Pregunta
+                    </>
+                  )}
                 </h3>
                 
-                <form onSubmit={handleAddQuestion} className="space-y-4">
+                <form onSubmit={handleSubmitQuestion} className="space-y-4">
                   <div>
                     <label className="text-xs text-zinc-400 font-semibold block mb-1">Texto de la Pregunta</label>
                     <input 
@@ -917,13 +981,28 @@ export default function AdminPage() {
                     ))}
                   </div>
 
-                  <div className="flex justify-end pt-2">
+                  <div className="flex justify-end items-center gap-2 pt-2">
+                    {editingQuestionId && (
+                      <button
+                        type="button"
+                        onClick={cancelEditing}
+                        className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs py-2.5 px-5 rounded-xl transition cursor-pointer active:scale-95"
+                      >
+                        Cancelar
+                      </button>
+                    )}
                     <button
                       type="submit"
                       disabled={addingQuestion}
                       className="bg-gradient-to-r from-neon-blue to-neon-purple hover:shadow-neon-blue/20 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition cursor-pointer active:scale-95 disabled:opacity-50"
                     >
-                      {addingQuestion ? 'Guardando...' : 'Guardar Pregunta'}
+                      {addingQuestion ? (
+                        'Guardando...'
+                      ) : editingQuestionId ? (
+                        'Actualizar Pregunta'
+                      ) : (
+                        'Guardar Pregunta'
+                      )}
                     </button>
                   </div>
                 </form>
@@ -958,27 +1037,36 @@ export default function AdminPage() {
 
                 <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
                   {questions.map((q, idx) => (
-                    <div key={q.id} className="p-3 bg-zinc-950/40 border border-zinc-900 rounded-xl flex justify-between items-start hover:border-zinc-800 transition">
+                    <div key={q.id} className={`p-3 bg-zinc-950/40 border rounded-xl flex justify-between items-start hover:border-zinc-800 transition ${editingQuestionId === q.id ? 'border-neon-blue/60 bg-neon-blue/5' : 'border-zinc-900'}`}>
                       <div className="flex-1 min-w-0 pr-4">
-                        <p className="text-sm font-semibold text-white truncate">{idx + 1}. {q.question_text}</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1.5">
+                        <p className="text-sm font-semibold text-white break-words">{idx + 1}. {q.question_text}</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 mt-1.5">
                           {q.options.map((opt, oIdx) => (
                             <span 
                               key={oIdx} 
-                              className={`text-[10px] truncate ${oIdx === q.correct_option_index ? 'text-neon-green font-bold' : 'text-zinc-500'}`}
+                              className={`text-[10px] break-words ${oIdx === q.correct_option_index ? 'text-neon-green font-bold' : 'text-zinc-500'}`}
                             >
                               {String.fromCharCode(65 + oIdx)}) {opt}
                             </span>
                           ))}
                         </div>
                       </div>
-                      <button 
-                        onClick={() => handleDeleteQuestion(q.id)}
-                        className="text-zinc-600 hover:text-neon-red p-1 transition cursor-pointer"
-                        title="Eliminar pregunta"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                        <button 
+                          onClick={() => startEditingQuestion(q)}
+                          className={`p-1 transition cursor-pointer rounded ${editingQuestionId === q.id ? 'text-neon-blue bg-neon-blue/10' : 'text-zinc-500 hover:text-neon-blue hover:bg-zinc-900'}`}
+                          title="Editar pregunta"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteQuestion(q.id)}
+                          className="text-zinc-500 hover:text-neon-red p-1 transition cursor-pointer rounded hover:bg-zinc-900"
+                          title="Eliminar pregunta"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
 
