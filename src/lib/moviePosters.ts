@@ -1,66 +1,64 @@
 /**
  * Mapa de películas Disney/Pixar a sus URLs de portadas.
- * Usa el CDN de imágenes de TMDB (The Movie Database).
+ * Todos los paths fueron verificados directamente contra la API de TMDB.
  * Las claves coinciden exactamente con los nombres en los `options` de las preguntas.
  *
- * Para actualizar/agregar posters:
- * 1. Busca la película en https://www.themoviedb.org
- * 2. Copia el path del poster de la URL de la imagen
- * 3. Usa el formato: https://image.tmdb.org/t/p/w342/{poster_path}
+ * Fuente: https://api.themoviedb.org/3/search/movie
+ * CDN: https://image.tmdb.org/t/p/w342/{poster_path}
  */
 export const MOVIE_POSTERS: Record<string, string> = {
   // ─── Pixar modernas ───────────────────────────────────────────────────────────
-  'Turning Red':              'https://image.tmdb.org/t/p/w342/qSdjk9oAKSzmUfu86I07KAScKIQ.jpg',
-  'Luca':                     'https://image.tmdb.org/t/p/w342/jTswp6KyDYKtvC52GbHagrZbGvD.jpg',
-  'Soul':                     'https://image.tmdb.org/t/p/w342/hm58Jw4Lw8OIeECIq5qyPYhAeRJ.jpg',
-  'Intensamente':             'https://image.tmdb.org/t/p/w342/ltarPqc84ePye9eFMt0FGMhxFak.jpg',
-  'Coco':                     'https://image.tmdb.org/t/p/w342/gGEsBPAijhVUFoiNpgZXqRVWJt2.jpg',
-  'Encanto':                  'https://image.tmdb.org/t/p/w342/4j0PNHkMr5ax3IA8tjtxcmPU3QT.jpg',
-  'Moana':                    'https://image.tmdb.org/t/p/w342/inVq3FRqcYIRl2la8iZikYYxFNR.jpg',
-  'Raya y el último dragón':  'https://image.tmdb.org/t/p/w342/lPsD10PP4rgUGiGR4CCXA6iY0QQ.jpg',
+  'Turning Red':              'https://image.tmdb.org/t/p/w342/djM4COTksd5YRIdd9uEl8eA3iaa.jpg',  // id: 508947
+  'Luca':                     'https://image.tmdb.org/t/p/w342/jTswp6KyDYKtvC52GbHagrZbGvD.jpg',  // id: 508943
+  'Soul':                     'https://image.tmdb.org/t/p/w342/xJ7MCAy4oCLerPo3JjnB8lKOhl4.jpg',  // id: 508442
+  'Intensamente':             'https://image.tmdb.org/t/p/w342/sG3bHZWCMOZwhUq71WbPG9Vrrwc.jpg',  // id: 150540 (Inside Out)
+  'Coco':                     'https://image.tmdb.org/t/p/w342/vwsFGblLYxWBNjg9pdWN1Mm5YfW.jpg',  // id: 354912
+  'Encanto':                  'https://image.tmdb.org/t/p/w342/d0ezQ1Jz0lpNsX1skEmIvqRL7mN.jpg',  // id: 568124
+  'Moana':                    'https://image.tmdb.org/t/p/w342/y6wkgEH1gTWAafH9Bc7cNNut0Kf.jpg',  // id: 277834 (Vaiana 2016)
+  'Raya y el último dragón':  'https://image.tmdb.org/t/p/w342/hbjOtofNpvFvhzBUUoZGAjkjjsl.jpg',  // id: 527774
 
   // ─── Disney modernas ──────────────────────────────────────────────────────────
-  'Frozen':                   'https://image.tmdb.org/t/p/w342/kgwjIb2JDHRhNk13lmSxiClFjVk.jpg',
-  'Enredados':                'https://image.tmdb.org/t/p/w342/pCJFMLMCH5zLecDFfaKCFsGC5sm.jpg',
-  'Valiente':                 'https://image.tmdb.org/t/p/w342/aMEsvTUklw0uZ3gk7oPlrRly9JH.jpg',
-  'La Princesa y el Sapo':    'https://image.tmdb.org/t/p/w342/mAkVFnFB1VEeKfOmxCSp2QCGFKo.jpg',
+  'Frozen':                   'https://image.tmdb.org/t/p/w342/sGNuWC4BwqOB4l0tkbKwLy70tXC.jpg',  // id: 109445
+  'Enredados':                'https://image.tmdb.org/t/p/w342/z5kvXWek4smCyeWBDJQkT5sLc9T.jpg',  // id: 38757
+  'Valiente':                 'https://image.tmdb.org/t/p/w342/cTouCa0ObuGD1P2nKOQ7A21wm9p.jpg',  // id: 62177 (Brave)
+  'La Princesa y el Sapo':    'https://image.tmdb.org/t/p/w342/lSNqVycC40mujo0tiRZvp6Ef5qQ.jpg',  // id: 10198
 
   // ─── Clásicas Disney ─────────────────────────────────────────────────────────
-  'La Bella y la Bestia':     'https://image.tmdb.org/t/p/w342/9GYBaFmFYQe2RRJEk4Hb7GGPBR1.jpg',
-  'Cenicienta':               'https://image.tmdb.org/t/p/w342/7fHYiMRNLBjzJRBpFR8ovgmBz9R.jpg',
-  'La Sirenita':              'https://image.tmdb.org/t/p/w342/v0yCCyXJoMoRmFhUXHAUSmfuhWE.jpg',
-  'Aladdin':                  'https://image.tmdb.org/t/p/w342/oa3mulLVJfNGGMhXjPOBOEfzNDT.jpg',
-  'Pocahontas':               'https://image.tmdb.org/t/p/w342/r2WFbQtH7V7kijJZtRlNI4mVEUJ.jpg',
-  'Mulan':                    'https://image.tmdb.org/t/p/w342/oEeXDH4lsQiRjATVaI7g0FQyZNa.jpg',
-  'Hércules':                 'https://image.tmdb.org/t/p/w342/q72sXvAo3bG5kLMFJG9GJpvFfCJ.jpg',
-  'Tarzán':                   'https://image.tmdb.org/t/p/w342/ekiKMQp7xTfkE80UNjU8JakH9GR.jpg',
-  'La Bella Durmiente':       'https://image.tmdb.org/t/p/w342/mEFfRnhPBLxJiVSj5l8pCWFQqBo.jpg',
-  'Blancanieves y los siete enanos': 'https://image.tmdb.org/t/p/w342/hRNmCWoKMVHAIJpPBJBMhzPdlFr.jpg',
-  'Pinocho':                  'https://image.tmdb.org/t/p/w342/jEpuorBjPhQ3PNVPp6ky1UBxEfA.jpg',
-  'Alicia en el país de las maravillas': 'https://image.tmdb.org/t/p/w342/m7BaTyNwHCEYC3TKCApV3hjNJOo.jpg',
+  'La Bella y la Bestia':     'https://image.tmdb.org/t/p/w342/1FxMtEUc6DP1MXsTBftOFaoCVVO.jpg',  // id: 10020
+  'Cenicienta':               'https://image.tmdb.org/t/p/w342/vqzeSm5Agvio7DahhKXaySUbUUW.jpg',  // id: 11224
+  'La Sirenita':              'https://image.tmdb.org/t/p/w342/Vc0KvO7z2OzEbRs6nyZs9xD81s.jpg',   // id: 10144
+  'Aladdin':                  'https://image.tmdb.org/t/p/w342/5ALwczKzFxbsiMDlHuy7aREDCzr.jpg',  // id: 812
+  'Pocahontas':               'https://image.tmdb.org/t/p/w342/o8QGvm0zDrJ8aONM8G5dW4BNawG.jpg',  // id: 10530
+  'Mulan':                    'https://image.tmdb.org/t/p/w342/towmTJ0k29quKI9IDnOZKAAtQx.jpg',   // id: 10674
+  'Hércules':                 'https://image.tmdb.org/t/p/w342/iwjP7ImLzXZjKHnCUChJThEtNJG.jpg',  // id: 11970
+  'Tarzán':                   'https://image.tmdb.org/t/p/w342/1Gk8iihu4Q4BGh2n1IwNLB3zM8E.jpg',  // id: 37135
+  'La Bella Durmiente':       'https://image.tmdb.org/t/p/w342/ofoVXR8gBYhV4e0MpRQtSpeXLiK.jpg',  // id: 10882
+  'Blancanieves y los siete enanos': 'https://image.tmdb.org/t/p/w342/b2ZPP3bZqDOzqTHr1TlFIFPWP48.jpg', // id: 408
+  'Pinocho':                  'https://image.tmdb.org/t/p/w342/sAluF7lNc4Mv3qxx1mmOgsfbr0C.jpg',  // id: 10895
+  'Alicia en el país de las maravillas': 'https://image.tmdb.org/t/p/w342/zOJKtTdToc8FcjmmbavkjUxv2Ue.jpg', // id: 12092
+  'Peter Pan':                'https://image.tmdb.org/t/p/w342/tDvGRWSdqT31ADijJf9OhbTbQ77.jpg',  // id: 10693
 
   // ─── Pixar clásicas ──────────────────────────────────────────────────────────
-  'Toy Story':                'https://image.tmdb.org/t/p/w342/uXDfjJbdP4ijW5hWSBrPrlKpxab.jpg',
-  'Monsters, Inc.':           'https://image.tmdb.org/t/p/w342/sgheSKxZkttIe8ONsf2sWXPgip3.jpg',
-  'Buscando a Nemo':          'https://image.tmdb.org/t/p/w342/zj6DP2SgVFvBsRm0lA9XVHsaQAL.jpg',
-  'Cars':                     'https://image.tmdb.org/t/p/w342/5yXDzI6u0qBMcfJAy0JGBHKdEGF.jpg',
-  'Ratatouille':              'https://image.tmdb.org/t/p/w342/npHNjldbeTHdKKw28bJKs7lzqzj.jpg',
-  'Wall-E':                   'https://image.tmdb.org/t/p/w342/hbhFnRzzg6ZDmm8YAmxBnQpQIPh.jpg',
-  'Up: Una aventura de altura': 'https://image.tmdb.org/t/p/w342/a104yvFEqEiCEtVEIkT1yv6OHfP.jpg',
+  'Toy Story':                'https://image.tmdb.org/t/p/w342/jvn7wy3RSNEXnFSXLpH2of2LcV6.jpg',  // id: 862
+  'Monsters, Inc.':           'https://image.tmdb.org/t/p/w342/g3SgHEb5ej2MioGfYLrZVshF909.jpg',  // id: 585
+  'Buscando a Nemo':          'https://image.tmdb.org/t/p/w342/jPhak722pNGxQIXSEfeWIUqBrO5.jpg',  // id: 12
+  'Cars':                     'https://image.tmdb.org/t/p/w342/lgBe9KD6DoLyQP28JZ6fSUGK8j0.jpg',  // id: 920 ✅
+  'Ratatouille':              'https://image.tmdb.org/t/p/w342/nGUelOVetiRpY2wTBMHTbrTIGYC.jpg',  // id: 2062
+  'Wall-E':                   'https://image.tmdb.org/t/p/w342/5CXpoYB2YAZRPBcv9pjkgR6tZ0X.jpg',  // id: 10681
+  'Up: Una aventura de altura': 'https://image.tmdb.org/t/p/w342/1N0LtzUueXrlnpL466jQBJ6iAuj.jpg', // id: 14160
 
   // ─── Clásicas ─────────────────────────────────────────────────────────────────
-  'El Rey León':              'https://image.tmdb.org/t/p/w342/sCanDWNcC6g6qFxMfSXjRzAlreF.jpg',
-  'El Libro de la Selva':     'https://image.tmdb.org/t/p/w342/eDaebg0bG4bJ5NrNi3FbLHAHoMi.jpg',
-  'El Libro de la Vida':      'https://image.tmdb.org/t/p/w342/qvf4mKCjq3Coj07e1e5x4lxTr0T.jpg',
-  'Tierra de Osos':           'https://image.tmdb.org/t/p/w342/5GBMbJsJBHn2a7hJJZstDJ3CRBQ.jpg',
-  'Lilo y Stitch':            'https://image.tmdb.org/t/p/w342/jlBPNaTiQzN9eGfbBPzIqq4xFlJ.jpg',
-  'Peter Pan':                'https://image.tmdb.org/t/p/w342/ufNlMMKwh7Jbqv5Sa8gWEhaCmE2.jpg',
-  'Aviones':                  'https://image.tmdb.org/t/p/w342/jTBd29fFVLRt9Ww8ryxcR1BRnY5.jpg',
+  'El Rey León':              'https://image.tmdb.org/t/p/w342/b0MxU37dNmMwKtoPVYPKOZSIrIn.jpg',  // id: 8587
+  'El Libro de la Selva':     'https://image.tmdb.org/t/p/w342/1w8wk8htVPW5cdCYnRU4bt5y5Fw.jpg',  // id: 9325
+  'El Libro de la Vida':      'https://image.tmdb.org/t/p/w342/k669nOalwu7NKhW7aWNJKN7Nxvi.jpg',  // id: 228326
+  'Tierra de Osos':           'https://image.tmdb.org/t/p/w342/1XwOQNSby3HZfKMZcY7rtZw4KR.jpg',  // id: 10009 (Brother Bear)
+  'Lilo y Stitch':            'https://image.tmdb.org/t/p/w342/dTYyAszU6NWbmWGvhqLZpZTdS5T.jpg',  // id: 11544
+  'Aviones':                  'https://image.tmdb.org/t/p/w342/6S5JjRheyl3oyLmJVcxcQ8yqDU3.jpg',  // id: 151960
 };
 
 /**
  * Obtiene la URL del poster de una película dado su nombre.
- * Si no se encuentra, retorna null (mostrará un fallback).
+ * Si no se encuentra, retorna null (mostrará un fallback con ícono de música).
  */
 export function getMoviePoster(movieName: string): string | null {
   return MOVIE_POSTERS[movieName] ?? null;
