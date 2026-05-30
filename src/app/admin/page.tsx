@@ -867,13 +867,12 @@ export default function AdminPage() {
         setCurrentQuestionIndex(index);
       }
 
+      // No modificamos music_video_playing ni music_video_time al cambiar de pregunta
       const { data, error } = await supabase
         .from('rooms')
         .update({
           current_question_id: q.id,
-          question_started_at: new Date().toISOString(),
-          music_video_playing: false,
-          music_video_time: q.video_start_seconds || 0
+          question_started_at: new Date().toISOString()
         })
         .eq('id', room.id)
         .select()
@@ -889,14 +888,8 @@ export default function AdminPage() {
         return [...prev, q.id];
       });
 
-      if (playerRef.current) {
-        if (typeof playerRef.current.seekTo === 'function') {
-          playerRef.current.seekTo(q.video_start_seconds || 0, true);
-        }
-        if (typeof playerRef.current.pauseVideo === 'function') {
-          playerRef.current.pauseVideo();
-        }
-      }
+      // El reproductor de música no se altera al cambiar de pregunta de canción,
+      // queda en el mismo estado (reproduciendo o pausado) y momento que antes.
       
       // Esperamos un segundo a que se estabilice el reproductor antes de aceptar eventos automáticos
       setTimeout(() => {
@@ -924,21 +917,12 @@ export default function AdminPage() {
         }
         playerRef.current.pauseVideo();
       } else {
-        const activeQ = questions.find(q => q.id === room.current_question_id);
-        const startSec = activeQ?.video_start_seconds || 0;
-        
         let ytTime = 0;
         if (typeof playerRef.current.getCurrentTime === 'function') {
           ytTime = Math.floor(playerRef.current.getCurrentTime());
         }
         
-        // Si el tiempo actual de YouTube es 0 o difiere significativamente del inicio de la pregunta activa,
-        // forzamos a que empiece en el segundo de inicio correcto para evitar desfases del buffer
-        if (ytTime === 0 || Math.abs(ytTime - startSec) > 10) {
-          currentTime = startSec;
-        } else {
-          currentTime = ytTime;
-        }
+        currentTime = ytTime;
         
         if (typeof playerRef.current.seekTo === 'function') {
           playerRef.current.seekTo(currentTime, true);
@@ -1010,14 +994,19 @@ export default function AdminPage() {
     if (!room) return;
     setLoading(true);
     try {
+      let currentTime = room.music_video_time || 0;
+      if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+        currentTime = Math.floor(playerRef.current.getCurrentTime());
+      }
+
       const { data, error } = await supabase
         .from('rooms')
         .update({
           status: 'MUSIC',
           current_question_id: null,
           question_started_at: null,
-          music_video_playing: false,
-          music_video_time: 0
+          music_video_playing: room.music_video_playing || false,
+          music_video_time: currentTime
         })
         .eq('id', room.id)
         .select()
@@ -1062,18 +1051,29 @@ export default function AdminPage() {
         updates.buzzer_question = null;
         updates.music_video_playing = false;
         updates.music_video_time = 0;
+        if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
+          playerRef.current.pauseVideo();
+        }
       } else if (newStatus === 'BUZZER') {
         updates.buzzer_active = false;
         updates.buzzer_question = '';
         updates.music_video_playing = false;
         updates.music_video_time = 0;
+        if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
+          playerRef.current.pauseVideo();
+        }
       } else if (newStatus === 'MUSIC') {
         updates.current_question_id = null;
         updates.question_started_at = null;
         updates.buzzer_active = false;
         updates.buzzer_question = null;
-        updates.music_video_playing = false;
-        updates.music_video_time = 0;
+        
+        let currentTime = room.music_video_time || 0;
+        if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+          currentTime = Math.floor(playerRef.current.getCurrentTime());
+        }
+        updates.music_video_playing = room.music_video_playing || false;
+        updates.music_video_time = currentTime;
       }
 
       const { data, error } = await supabase
