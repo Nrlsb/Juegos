@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0b0d19; /* Fondo espacial/cyberpunk oscuro */
+  --foreground: #f8fafc;
+  --neon-blue: #00f0ff;
+  --neon-pink: #ff007f;
+  --neon-purple: #bd00ff;
+  --neon-green: #39ff14;
+  --neon-red: #ff3131;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-neon-blue: var(--neon-blue);
+  --color-neon-pink: var(--neon-pink);
+  --color-neon-purple: var(--neon-purple);
+  --color-neon-green: var(--neon-green);
+  --color-neon-red: var(--neon-red);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  overflow-x: hidden;
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(189, 0, 255, 0.15) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(0, 240, 255, 0.15) 0px, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* Clases de brillo neon */
+.neon-glow-blue {
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.6), 0 0 20px rgba(0, 240, 255, 0.3);
+}
+
+.neon-glow-pink {
+  text-shadow: 0 0 10px rgba(ff, 0, 7f, 0.6), 0 0 20px rgba(ff, 0, 7f, 0.3);
+}
+
+.neon-border-blue {
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+}
+
+.neon-border-pink {
+  box-shadow: 0 0 15px rgba(255, 0, 127, 0.3);
+  border: 1px solid rgba(255, 0, 127, 0.5);
+}
+
+.neon-border-purple {
+  box-shadow: 0 0 15px rgba(189, 0, 255, 0.3);
+  border: 1px solid rgba(189, 0, 255, 0.5);
+}
+
+.neon-border-green {
+  box-shadow: 0 0 15px rgba(57, 255, 20, 0.3);
+  border: 1px solid rgba(57, 255, 20, 0.5);
+}
+
+/* Efecto Glassmorphism */
+.glass-panel {
+  background: rgba(18, 22, 41, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+/* Animaciones */
+@keyframes pulse-timer {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); text-shadow: 0 0 15px rgba(255, 49, 49, 0.8); color: var(--neon-red); }
+  100% { transform: scale(1); }
+}
+
+.animate-pulse-timer {
+  animation: pulse-timer 1s infinite;
+}
+
+@keyframes progress-bar {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.timer-progress-bar {
+  animation: progress-bar 15s linear forwards;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
