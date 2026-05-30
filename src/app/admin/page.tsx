@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
-  Users, Play, Award, RotateCcw, Volume2, Plus, 
+  Users, Play, Award, RotateCcw, RotateCw, Volume2, Plus, 
   HelpCircle, CheckCircle, BarChart3, Trophy, ArrowRight, Trash2, ShieldAlert,
   Zap, Radio, ArrowUp, ArrowDown, Search, X, Edit2, Music, Pause
 } from 'lucide-react';
@@ -927,6 +927,37 @@ export default function AdminPage() {
       setRoom(data);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  // Adelantar o retroceder la música por N segundos
+  const seekMusicBySeconds = async (seconds: number) => {
+    if (!room || !playerRef.current) return;
+    try {
+      let currentTime = room.music_video_time || 0;
+      if (typeof playerRef.current.getCurrentTime === 'function') {
+        currentTime = Math.floor(playerRef.current.getCurrentTime());
+      }
+      
+      const newTime = Math.max(0, currentTime + seconds);
+      
+      if (typeof playerRef.current.seekTo === 'function') {
+        playerRef.current.seekTo(newTime, true);
+      }
+
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          music_video_time: newTime
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+    } catch (e) {
+      console.error('Error al adelantar/retroceder música:', e);
     }
   };
 
@@ -2472,8 +2503,8 @@ export default function AdminPage() {
                   </div>
 
                   <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {/* Columna Izquierda: Reproductor y controles permanentes (5 columnas) */}
-                    <div className="lg:col-span-5 flex flex-col gap-4 font-sans border-r border-zinc-900/50 pr-0 lg:pr-6">
+                    {/* Columna Izquierda: Reproductor y controles permanentes (8 columnas) */}
+                    <div className="lg:col-span-8 flex flex-col gap-4 font-sans border-r border-zinc-900/50 pr-0 lg:pr-6">
                       <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-widest block">Reproductor de Video</span>
                       
                       {/* Contenedor del reproductor de YouTube */}
@@ -2488,22 +2519,47 @@ export default function AdminPage() {
                       </div>
 
                       {/* Controles de reproducción */}
-                      <div className="flex items-center gap-3 bg-zinc-950/40 p-4 rounded-xl border border-zinc-900">
-                        <button
-                          onClick={toggleMusicPlayback}
-                          disabled={!playerReady}
-                          className={`w-12 h-12 rounded-full flex items-center justify-center transition shrink-0 cursor-pointer ${
-                            room.music_video_playing
-                              ? 'bg-neon-red/10 text-neon-red border border-neon-red/30 hover:bg-neon-red/20'
-                              : 'bg-neon-green/10 text-neon-green border border-neon-green/30 hover:bg-neon-green/20'
-                          }`}
-                        >
-                          {room.music_video_playing ? (
-                            <Pause className="w-5 h-5 fill-current" />
-                          ) : (
-                            <Play className="w-5 h-5 fill-current ml-0.5" />
-                          )}
-                        </button>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-zinc-950/40 p-4 rounded-xl border border-zinc-900">
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* Retroceder 5 segundos */}
+                          <button
+                            onClick={() => seekMusicBySeconds(-5)}
+                            disabled={!playerReady}
+                            className="w-10 h-10 rounded-full flex items-center justify-center bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 transition cursor-pointer relative"
+                            title="Retroceder 5 segundos"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            <span className="text-[8px] font-bold absolute bottom-1">-5s</span>
+                          </button>
+
+                          {/* Play / Pause */}
+                          <button
+                            onClick={toggleMusicPlayback}
+                            disabled={!playerReady}
+                            className={`w-14 h-14 rounded-full flex items-center justify-center transition shrink-0 cursor-pointer ${
+                              room.music_video_playing
+                                ? 'bg-neon-red/10 text-neon-red border border-neon-red/30 hover:bg-neon-red/20'
+                                : 'bg-neon-green/10 text-neon-green border border-neon-green/30 hover:bg-neon-green/20'
+                            }`}
+                          >
+                            {room.music_video_playing ? (
+                              <Pause className="w-6 h-6 fill-current" />
+                            ) : (
+                              <Play className="w-6 h-6 fill-current ml-1" />
+                            )}
+                          </button>
+
+                          {/* Avanzar 5 segundos */}
+                          <button
+                            onClick={() => seekMusicBySeconds(5)}
+                            disabled={!playerReady}
+                            className="w-10 h-10 rounded-full flex items-center justify-center bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 transition cursor-pointer relative"
+                            title="Avanzar 5 segundos"
+                          >
+                            <RotateCw className="w-4 h-4" />
+                            <span className="text-[8px] font-bold absolute bottom-1">+5s</span>
+                          </button>
+                        </div>
 
                         <div className="min-w-0">
                           <p className="text-xs font-bold text-white truncate">
@@ -2556,8 +2612,8 @@ export default function AdminPage() {
                       })()}
                     </div>
 
-                    {/* Columna Derecha: Listado de Canciones o Estadísticas de Respuestas (7 columnas) */}
-                    <div className="lg:col-span-7 flex flex-col gap-4 font-sans">
+                    {/* Columna Derecha: Listado de Canciones o Estadísticas de Respuestas (4 columnas) */}
+                    <div className="lg:col-span-4 flex flex-col gap-4 font-sans">
                       {!room.current_question_id ? (
                         /* LISTADO DE CANCIONES DE MÚSICA DISPONIBLES PARA LANZAR */
                         <div className="flex flex-col h-full">
