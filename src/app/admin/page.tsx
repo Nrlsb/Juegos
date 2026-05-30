@@ -83,6 +83,7 @@ export default function AdminPage() {
   const playerRef = useRef<any>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
+  const [askedMusicQuestionIds, setAskedMusicQuestionIds] = useState<string[]>([]);
 
   // Seleccionar una pregunta de la lista para el pulsador
   const handleSelectBuzzerQuestion = (q: BuzzerQuestion) => {
@@ -871,6 +872,12 @@ export default function AdminPage() {
       if (error) throw error;
       setRoom(data);
       setResponses([]);
+
+      // Registrar en el historial de canciones preguntadas
+      setAskedMusicQuestionIds(prev => {
+        if (prev.includes(q.id)) return prev;
+        return [...prev, q.id];
+      });
 
       if (playerRef.current) {
         if (typeof playerRef.current.seekTo === 'function') {
@@ -2576,16 +2583,45 @@ export default function AdminPage() {
                         const activeQ = questions.find(q => q.id === room.current_question_id);
                         if (!activeQ) return null;
                         return (
-                          <div className="bg-zinc-950/40 p-4 rounded-2xl border border-zinc-900 space-y-3">
+                          <div className="bg-zinc-950/40 p-4 rounded-2xl border border-zinc-900 space-y-4 text-left">
                             <div>
-                              <span className="text-[9px] text-neon-green font-black uppercase tracking-wider block">Pregunta Activa en Teléfonos</span>
-                              <p className="text-xs font-bold text-white truncate">"{activeQ.song_title}"</p>
-                              <p className="text-[10px] text-zinc-400 mt-0.5">
-                                Película correcta: <span className="text-neon-green font-semibold">{activeQ.options[activeQ.correct_option_index]}</span>
-                              </p>
+                              <span className="text-[9px] text-neon-green font-black uppercase tracking-wider block mb-1">Pregunta Activa en Teléfonos</span>
+                              <p className="text-sm font-bold text-white leading-snug">"{activeQ.question_text}"</p>
+                              {activeQ.song_title && (
+                                <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1">
+                                  <Music className="w-3 h-3 text-neon-green" /> Canción: <span className="text-white font-medium">{activeQ.song_title}</span>
+                                </p>
+                              )}
                             </div>
 
-                            <div className="flex gap-2">
+                            {/* Opciones de respuesta para el administrador */}
+                            <div className="space-y-1.5">
+                              <span className="text-[9px] text-zinc-500 font-extrabold uppercase tracking-widest block">Opciones del juego</span>
+                              <div className="grid grid-cols-2 gap-2">
+                                {activeQ.options.map((opt, idx) => {
+                                  const isCorrect = idx === activeQ.correct_option_index;
+                                  return (
+                                    <div 
+                                      key={idx} 
+                                      className={`p-2 rounded-lg border text-xs truncate font-medium flex items-center gap-1.5 ${
+                                        isCorrect 
+                                          ? 'border-neon-green/45 bg-neon-green/10 text-white' 
+                                          : 'border-zinc-800/80 bg-zinc-950/60 text-zinc-400'
+                                      }`}
+                                    >
+                                      <span className={`w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold ${
+                                        isCorrect ? 'bg-neon-green text-zinc-950' : 'bg-zinc-900 text-zinc-500'
+                                      }`}>
+                                        {String.fromCharCode(65 + idx)}
+                                      </span>
+                                      <span className="truncate">{opt}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2 pt-1 border-t border-zinc-900/60">
                               <button
                                 onClick={async () => {
                                   if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
@@ -2617,7 +2653,18 @@ export default function AdminPage() {
                       {!room.current_question_id ? (
                         /* LISTADO DE CANCIONES DE MÚSICA DISPONIBLES PARA LANZAR */
                         <div className="flex flex-col h-full">
-                          <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-widest block mb-2">Seleccionar Canción</span>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-widest block">Seleccionar Canción</span>
+                            {askedMusicQuestionIds.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setAskedMusicQuestionIds([])}
+                                className="text-[9px] text-zinc-500 hover:text-neon-green transition font-bold uppercase tracking-wider underline cursor-pointer"
+                              >
+                                Limpiar historial
+                              </button>
+                            )}
+                          </div>
                           <div className="mb-3 relative">
                             <input
                               type="text"
@@ -2640,30 +2687,49 @@ export default function AdminPage() {
 
                               return (
                                 <>
-                                  {filtered.map((q) => (
-                                    <div key={q.id} className="p-2.5 bg-zinc-950/30 border border-zinc-900 rounded-xl flex items-center justify-between hover:border-zinc-850 hover:bg-zinc-900/10 transition">
-                                      <div className="flex-1 min-w-0 pr-3">
-                                        <h4 className="text-xs font-bold text-white flex items-center gap-1.5 truncate">
-                                          <Music className="w-3 h-3 text-neon-green" />
-                                          {q.song_title || 'Canción sin título'}
-                                        </h4>
-                                        <p className="text-[10px] text-zinc-400 mt-0.5 truncate">
-                                          Película correcta: <span className="text-neon-green font-semibold">{q.options[q.correct_option_index]}</span>
-                                        </p>
-                                        <p className="text-[9px] text-zinc-500 font-mono mt-0.5">
-                                          Segundo de inicio: {q.video_start_seconds}s
-                                        </p>
-                                      </div>
-                                      
-                                      <button
-                                        onClick={() => launchMusicQuestion(q)}
-                                        disabled={loading}
-                                        className="bg-neon-green/10 hover:bg-neon-green/20 text-neon-green border border-neon-green/30 hover:border-neon-green font-bold text-[10px] py-1.5 px-3 rounded-lg transition cursor-pointer flex items-center gap-1 shrink-0"
+                                  {filtered.map((q) => {
+                                    const isAsked = askedMusicQuestionIds.includes(q.id);
+                                    return (
+                                      <div 
+                                        key={q.id} 
+                                        className={`p-2.5 border rounded-xl flex items-center justify-between hover:border-zinc-855 transition ${
+                                          isAsked 
+                                            ? 'border-zinc-900/50 bg-zinc-950/10 opacity-50 hover:opacity-80' 
+                                            : 'bg-zinc-950/30 border-zinc-900 hover:bg-zinc-900/10'
+                                        }`}
                                       >
-                                        Lanzar a teléfonos
-                                      </button>
-                                    </div>
-                                  ))}
+                                        <div className="flex-1 min-w-0 pr-3">
+                                          <h4 className="text-xs font-bold text-white flex items-center gap-1.5 truncate">
+                                            <Music className="w-3 h-3 text-neon-green shrink-0" />
+                                            <span className="truncate">{q.song_title || 'Canción sin título'}</span>
+                                            {isAsked && (
+                                              <span className="text-[7.5px] bg-zinc-900 text-zinc-500 px-1.5 py-0.5 rounded border border-zinc-800 font-bold uppercase tracking-wider shrink-0">
+                                                Usada
+                                              </span>
+                                            )}
+                                          </h4>
+                                          <p className="text-[10px] text-zinc-400 mt-0.5 truncate">
+                                            Película correcta: <span className="text-neon-green font-semibold">{q.options[q.correct_option_index]}</span>
+                                          </p>
+                                          <p className="text-[9px] text-zinc-500 font-mono mt-0.5">
+                                            Segundo de inicio: {q.video_start_seconds}s
+                                          </p>
+                                        </div>
+                                        
+                                        <button
+                                          onClick={() => launchMusicQuestion(q)}
+                                          disabled={loading}
+                                          className={`font-bold text-[10px] py-1.5 px-3 rounded-lg transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                                            isAsked
+                                              ? 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-850 hover:border-zinc-700'
+                                              : 'bg-neon-green/10 hover:bg-neon-green/20 text-neon-green border border-neon-green/30 hover:border-neon-green'
+                                          }`}
+                                        >
+                                          {isAsked ? 'Lanzar de nuevo' : 'Lanzar a teléfonos'}
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
 
                                   {filtered.length === 0 && (
                                     <div className="text-center py-8 text-zinc-600">
