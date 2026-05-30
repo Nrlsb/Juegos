@@ -35,6 +35,8 @@ interface Player {
   bingo_marked?: any;
   bingo_called?: boolean;
   bingo_winner?: boolean;
+  bingo_line_called?: boolean;
+  bingo_line_winner?: boolean;
 }
 
 interface ResponseCount {
@@ -76,7 +78,7 @@ export default function AdminPage() {
 
   // Estados para el Modo Pulsador
   const [buzzerQuestionInput, setBuzzerQuestionInput] = useState('');
-  const [pointsToAwardInput, setPointsToAwardInput] = useState('100');
+  const [pointsToAwardInput, setPointsToAwardInput] = useState('20');
   const [selectedBuzzerQuestionId, setSelectedBuzzerQuestionId] = useState<string | null>(null);
   const [askedBuzzerQuestionIds, setAskedBuzzerQuestionIds] = useState<string[]>([]);
   const [buzzerQuestions, setBuzzerQuestions] = useState<BuzzerQuestion[]>([]);
@@ -1145,7 +1147,9 @@ export default function AdminPage() {
             bingo_card: null,
             bingo_marked: [],
             bingo_called: false,
-            bingo_winner: false
+            bingo_winner: false,
+            bingo_line_called: false,
+            bingo_line_winner: false
           })
           .eq('room_id', room.id);
         
@@ -1154,7 +1158,9 @@ export default function AdminPage() {
           bingo_card: null,
           bingo_marked: [],
           bingo_called: false,
-          bingo_winner: false
+          bingo_winner: false,
+          bingo_line_called: false,
+          bingo_line_winner: false
         })));
       }
 
@@ -1465,10 +1471,10 @@ export default function AdminPage() {
       
       if (pError) throw pError;
 
-      // 2. Darle puntos de bonificación (por ejemplo, 1000 puntos por ganar Bingo)
+      // 2. Darle puntos de bonificación (por ejemplo, 20 puntos por ganar Bingo)
       const winnerPlayer = players.find(p => p.id === winnerId);
       if (winnerPlayer) {
-        const newScore = winnerPlayer.score + 1000;
+        const newScore = winnerPlayer.score + 20;
         await supabase
           .from('players')
           .update({ score: newScore, bingo_winner: true })
@@ -1539,6 +1545,83 @@ export default function AdminPage() {
     }
   };
 
+  // Validar la Línea de un jugador
+  const validateLine = async (playerId: string) => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      // 1. Marcar al jugador como ganador de la línea y resetear bingo_line_called
+      const player = players.find(p => p.id === playerId);
+      if (!player) return;
+
+      const newScore = player.score + 10; // Línea: 10 puntos
+
+      const { error: pError } = await supabase
+        .from('players')
+        .update({ 
+          score: newScore,
+          bingo_line_winner: true,
+          bingo_line_called: false
+        })
+        .eq('id', playerId);
+      
+      if (pError) throw pError;
+
+      // Actualizar la lista local de jugadores
+      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, score: newScore, bingo_line_winner: true, bingo_line_called: false } : p));
+
+      // Sonido de éxito
+      try {
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+      } catch (e) {}
+
+      // Lanzar confeti para la línea
+      confetti({
+        particleCount: 50,
+        spread: 60,
+        origin: { y: 0.5 }
+      });
+
+      alert(`¡Se validó la línea de ${player.nickname} y se le otorgaron 10 puntos!`);
+    } catch (err: any) {
+      alert('Error al validar la Línea: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Rechazar la Línea de un jugador
+  const rejectLine = async (playerId: string) => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      const { error: pError } = await supabase
+        .from('players')
+        .update({ bingo_line_called: false })
+        .eq('id', playerId);
+      
+      if (pError) throw pError;
+
+      // Actualizar la lista local de jugadores
+      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, bingo_line_called: false } : p));
+
+      alert('La Línea fue rechazada y el juego continúa.');
+    } catch (err: any) {
+      alert('Error al rechazar la Línea: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Reiniciar la partida de Bingo
   const restartBingo = async () => {
     if (!room) return;
@@ -1566,7 +1649,9 @@ export default function AdminPage() {
           bingo_card: null,
           bingo_marked: [],
           bingo_called: false,
-          bingo_winner: false
+          bingo_winner: false,
+          bingo_line_called: false,
+          bingo_line_winner: false
         })
         .eq('room_id', room.id);
 
@@ -1575,7 +1660,9 @@ export default function AdminPage() {
         bingo_card: null,
         bingo_marked: [],
         bingo_called: false,
-        bingo_winner: false
+        bingo_winner: false,
+        bingo_line_called: false,
+        bingo_line_winner: false
       })));
 
       alert('Partida de Bingo reiniciada correctamente.');
@@ -3181,93 +3268,184 @@ export default function AdminPage() {
 
                   {/* Panel de Validación Prioritario: Si alguien cantó Bingo */}
                   {(() => {
-                    const playerWhoCalled = players.find(p => p.bingo_called);
-                    if (!playerWhoCalled) return null;
+                    const playerWhoCalledBingo = players.find(p => p.bingo_called);
+                    const playerWhoCalledLine = players.find(p => p.bingo_line_called);
 
-                    const played = room.bingo_songs_played || [];
-                    const card = playerWhoCalled.bingo_card || [];
-                    const marked = playerWhoCalled.bingo_marked || [];
+                    if (playerWhoCalledBingo) {
+                      const played = room.bingo_songs_played || [];
+                      const card = playerWhoCalledBingo.bingo_card || [];
+                      const marked = playerWhoCalledBingo.bingo_marked || [];
 
-                    return (
-                      <div className="mb-6 p-6 rounded-2xl bg-amber-500/10 border-2 border-amber-500/50 shadow-lg shadow-amber-500/10 relative overflow-hidden animate-pulse-glow">
-                        <div className="absolute top-0 right-0 p-2 bg-amber-500 text-zinc-950 text-xs font-black rounded-bl-xl uppercase tracking-wider">
-                          ¡BINGO CANTADO!
-                        </div>
-                        <h3 className="text-xl font-black text-white mb-2 flex items-center gap-2">
-                          🏆 {playerWhoCalled.nickname} ha cantado Bingo!
-                        </h3>
-                        <p className="text-xs text-zinc-300 mb-4">
-                          Verifica las canciones marcadas en su cartón de 4x3. Las canciones marcadas que ya han sonado se muestran con ✓. Si hay alguna marca roja, significa que no ha sonado.
-                        </p>
+                      return (
+                        <div className="mb-6 p-6 rounded-2xl bg-amber-500/10 border-2 border-amber-500/50 shadow-lg shadow-amber-500/10 relative overflow-hidden animate-pulse-glow">
+                          <div className="absolute top-0 right-0 p-2 bg-amber-500 text-zinc-950 text-xs font-black rounded-bl-xl uppercase tracking-wider">
+                            ¡BINGO CANTADO!
+                          </div>
+                          <h3 className="text-xl font-black text-white mb-2 flex items-center gap-2">
+                            🏆 {playerWhoCalledBingo.nickname} ha cantado Bingo!
+                          </h3>
+                          <p className="text-xs text-zinc-300 mb-4">
+                            Verifica las canciones marcadas en su cartón de 4x3. Las canciones marcadas que ya han sonado se muestran con ✓. Si hay alguna marca roja, significa que no ha sonado.
+                          </p>
 
-                        <div className="max-w-md mx-auto grid grid-cols-4 gap-3 mb-6">
-                          {card.map((song: any, idx: number) => {
-                            const isMarked = marked.includes(idx);
-                            const hasPlayed = played.some((pSong: any) => pSong.title === song.title);
-                            const isValidMark = isMarked && hasPlayed;
-                            const isInvalidMark = isMarked && !hasPlayed;
+                          <div className="max-w-md mx-auto grid grid-cols-4 gap-3 mb-6">
+                            {card.map((song: any, idx: number) => {
+                              const isMarked = marked.includes(idx);
+                              const hasPlayed = played.some((pSong: any) => pSong.title === song.title);
+                              const isValidMark = isMarked && hasPlayed;
+                              const isInvalidMark = isMarked && !hasPlayed;
 
-                            return (
-                              <div
-                                key={idx}
-                                className={`p-2.5 rounded-xl border text-center flex flex-col justify-between min-h-[90px] transition ${
-                                  isValidMark
-                                    ? 'border-neon-green bg-neon-green/10 text-white'
-                                    : isInvalidMark
-                                    ? 'border-neon-red bg-neon-red/10 text-white'
-                                    : isMarked
-                                    ? 'border-amber-500 bg-amber-500/10'
-                                    : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
-                                }`}
-                              >
-                                <span className="text-[9px] font-mono text-zinc-500 block mb-1">
-                                  #{idx + 1}
-                                </span>
-                                <p className="text-[10px] font-bold leading-snug line-clamp-2 truncate-lines">
-                                  {song.title}
-                                </p>
-                                <div className="mt-1 shrink-0 flex items-center justify-center">
-                                  {isValidMark ? (
-                                    <span className="text-[9px] bg-neon-green text-zinc-950 px-1.5 py-0.5 rounded font-black">
-                                      ✓ Sonó
-                                    </span>
-                                  ) : isInvalidMark ? (
-                                    <span className="text-[9px] bg-neon-red text-white px-1.5 py-0.5 rounded font-black animate-pulse">
-                                      ✗ No sonó
-                                    </span>
-                                  ) : isMarked ? (
-                                    <span className="text-[9px] bg-amber-500 text-zinc-950 px-1.5 py-0.5 rounded font-black">
-                                      Marcada
-                                    </span>
-                                  ) : (
-                                    <span className="text-[8px] text-zinc-600 font-medium">
-                                      No marcada
-                                    </span>
-                                  )}
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`p-2.5 rounded-xl border text-center flex flex-col justify-between min-h-[90px] transition ${
+                                    isValidMark
+                                      ? 'border-neon-green bg-neon-green/10 text-white'
+                                      : isInvalidMark
+                                      ? 'border-neon-red bg-neon-red/10 text-white'
+                                      : isMarked
+                                      ? 'border-amber-500 bg-amber-500/10'
+                                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                                  }`}
+                                >
+                                  <span className="text-[9px] font-mono text-zinc-500 block mb-1">
+                                    #{idx + 1}
+                                  </span>
+                                  <p className="text-[10px] font-bold leading-snug line-clamp-2 truncate-lines">
+                                    {song.title}
+                                  </p>
+                                  <div className="mt-1 shrink-0 flex items-center justify-center">
+                                    {isValidMark ? (
+                                      <span className="text-[9px] bg-neon-green text-zinc-950 px-1.5 py-0.5 rounded font-black">
+                                        ✓ Sonó
+                                      </span>
+                                    ) : isInvalidMark ? (
+                                      <span className="text-[9px] bg-neon-red text-white px-1.5 py-0.5 rounded font-black animate-pulse">
+                                        ✗ No sonó
+                                      </span>
+                                    ) : isMarked ? (
+                                      <span className="text-[9px] bg-amber-500 text-zinc-950 px-1.5 py-0.5 rounded font-black">
+                                        Marcada
+                                      </span>
+                                    ) : (
+                                      <span className="text-[8px] text-zinc-600 font-medium">
+                                        No marcada
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                              );
+                            })}
+                          </div>
 
-                        <div className="flex justify-center gap-3">
-                          <button
-                            onClick={() => validateBingo(playerWhoCalled.id)}
-                            disabled={loading}
-                            className="bg-neon-green text-zinc-950 font-black px-6 py-3 rounded-xl hover:shadow-neon-green/30 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
-                          >
-                            ✓ Validar y Declarar Ganador
-                          </button>
-                          <button
-                            onClick={() => rejectBingo(playerWhoCalled.id)}
-                            disabled={loading}
-                            className="bg-zinc-900 border border-zinc-800 text-neon-red font-bold px-6 py-3 rounded-xl hover:bg-zinc-850 active:scale-95 transition cursor-pointer"
-                          >
-                            ✗ Rechazar y Continuar
-                          </button>
+                          <div className="flex justify-center gap-3">
+                            <button
+                              onClick={() => validateBingo(playerWhoCalledBingo.id)}
+                              disabled={loading}
+                              className="bg-neon-green text-zinc-950 font-black px-6 py-3 rounded-xl hover:shadow-neon-green/30 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
+                            >
+                              ✓ Validar y Declarar Ganador (+20 pts)
+                            </button>
+                            <button
+                              onClick={() => rejectBingo(playerWhoCalledBingo.id)}
+                              disabled={loading}
+                              className="bg-zinc-900 border border-zinc-800 text-neon-red font-bold px-6 py-3 rounded-xl hover:bg-zinc-850 active:scale-95 transition cursor-pointer"
+                            >
+                              ✗ Rechazar y Continuar
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    );
+                      );
+                    }
+
+                    if (playerWhoCalledLine) {
+                      const played = room.bingo_songs_played || [];
+                      const card = playerWhoCalledLine.bingo_card || [];
+                      const marked = playerWhoCalledLine.bingo_marked || [];
+
+                      return (
+                        <div className="mb-6 p-6 rounded-2xl bg-amber-500/10 border-2 border-amber-500/50 shadow-lg shadow-amber-500/10 relative overflow-hidden animate-pulse-glow">
+                          <div className="absolute top-0 right-0 p-2 bg-amber-500 text-zinc-950 text-xs font-black rounded-bl-xl uppercase tracking-wider">
+                            ¡LÍNEA CANTADA!
+                          </div>
+                          <h3 className="text-xl font-black text-white mb-2 flex items-center gap-2">
+                            📢 ¡{playerWhoCalledLine.nickname} ha cantado Línea!
+                          </h3>
+                          <p className="text-xs text-zinc-300 mb-4">
+                            Verifica las canciones marcadas en su cartón de 4x3. Si completó una línea de 4 canciones válidas, ¡se le otorgan 10 puntos!
+                          </p>
+
+                          <div className="max-w-md mx-auto grid grid-cols-4 gap-3 mb-6">
+                            {card.map((song: any, idx: number) => {
+                              const isMarked = marked.includes(idx);
+                              const hasPlayed = played.some((pSong: any) => pSong.title === song.title);
+                              const isValidMark = isMarked && hasPlayed;
+                              const isInvalidMark = isMarked && !hasPlayed;
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`p-2.5 rounded-xl border text-center flex flex-col justify-between min-h-[90px] transition ${
+                                    isValidMark
+                                      ? 'border-neon-green bg-neon-green/10 text-white'
+                                      : isInvalidMark
+                                      ? 'border-neon-red bg-neon-red/10 text-white'
+                                      : isMarked
+                                      ? 'border-amber-500 bg-amber-500/10'
+                                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                                  }`}
+                                >
+                                  <span className="text-[9px] font-mono text-zinc-500 block mb-1">
+                                    #{idx + 1}
+                                  </span>
+                                  <p className="text-[10px] font-bold leading-snug line-clamp-2 truncate-lines">
+                                    {song.title}
+                                  </p>
+                                  <div className="mt-1 shrink-0 flex items-center justify-center">
+                                    {isValidMark ? (
+                                      <span className="text-[9px] bg-neon-green text-zinc-950 px-1.5 py-0.5 rounded font-black">
+                                        ✓ Sonó
+                                      </span>
+                                    ) : isInvalidMark ? (
+                                      <span className="text-[9px] bg-neon-red text-white px-1.5 py-0.5 rounded font-black animate-pulse">
+                                        ✗ No sonó
+                                      </span>
+                                    ) : isMarked ? (
+                                      <span className="text-[9px] bg-amber-500 text-zinc-950 px-1.5 py-0.5 rounded font-black">
+                                        Marcada
+                                      </span>
+                                    ) : (
+                                      <span className="text-[8px] text-zinc-600 font-medium">
+                                        No marcada
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="flex justify-center gap-3">
+                            <button
+                              onClick={() => validateLine(playerWhoCalledLine.id)}
+                              disabled={loading}
+                              className="bg-neon-green text-zinc-950 font-black px-6 py-3 rounded-xl hover:shadow-neon-green/30 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
+                            >
+                              ✓ Validar Línea (+10 pts)
+                            </button>
+                            <button
+                              onClick={() => rejectLine(playerWhoCalledLine.id)}
+                              disabled={loading}
+                              className="bg-zinc-900 border border-zinc-800 text-neon-red font-bold px-6 py-3 rounded-xl hover:bg-zinc-850 active:scale-95 transition cursor-pointer"
+                            >
+                              ✗ Rechazar y Continuar
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return null;
                   })()}
 
                   <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6">

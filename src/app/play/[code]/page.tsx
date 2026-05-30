@@ -15,6 +15,7 @@ interface Question {
   question_text: string;
   options: string[];
   correct_option_index: number;
+  category?: string;
 }
 
 interface Player {
@@ -26,6 +27,8 @@ interface Player {
   bingo_marked?: number[] | null;
   bingo_called?: boolean;
   bingo_winner?: boolean;
+  bingo_line_called?: boolean;
+  bingo_line_winner?: boolean;
 }
 
 export default function PlayPage({ params }: { params: Promise<{ code: string }> }) {
@@ -65,11 +68,12 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
   const [bingoMarked, setBingoMarked] = useState<number[]>([]);
   const [bingoCalled, setBingoCalled] = useState(false);
   const [bingoWinner, setBingoWinner] = useState(false);
+  const [bingoLineCalled, setBingoLineCalled] = useState(false);
+  const [bingoLineWinner, setBingoLineWinner] = useState(false);
   const [bingoSongsPlayed, setBingoSongsPlayed] = useState<any[]>([]);
   const [submittingBingoCall, setSubmittingBingoCall] = useState(false);
+  const [submittingBingoLineCall, setSubmittingBingoLineCall] = useState(false);
   const cardGeneratingRef = useRef(false);
-
-
 
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -161,6 +165,8 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
             setBingoMarked(updatedPlayer.bingo_marked || []);
             setBingoCalled(updatedPlayer.bingo_called || false);
             setBingoWinner(updatedPlayer.bingo_winner || false);
+            setBingoLineCalled(updatedPlayer.bingo_line_called || false);
+            setBingoLineWinner(updatedPlayer.bingo_line_winner || false);
 
             if (updatedPlayer.bingo_winner) {
               // Confeti continuo para el ganador
@@ -253,6 +259,8 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         setBingoMarked(playerData.bingo_marked || []);
         setBingoCalled(playerData.bingo_called || false);
         setBingoWinner(playerData.bingo_winner || false);
+        setBingoLineCalled(playerData.bingo_line_called || false);
+        setBingoLineWinner(playerData.bingo_line_winner || false);
       }
     } catch (err) {
       console.error('Error al inicializar sesión:', err);
@@ -300,11 +308,12 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
 
     const isCorrect = optionIndex === activeQuestion.correct_option_index;
     
-    // Puntuación: 500 puntos base + bono por velocidad de hasta 500 puntos
+    // Puntuación estándar:
+    // - Preguntas generales (Trivia): 10 puntos por pregunta
+    // - Adivinar película de Disney (Música): 10 puntos por película
     let pointsAwarded = 0;
     if (isCorrect) {
-      const speedBonus = Math.round((timeLeftAtAnswer / 15) * 500);
-      pointsAwarded = 500 + speedBonus;
+      pointsAwarded = 10;
     }
 
     try {
@@ -535,6 +544,35 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         .eq('id', playerId);
     } catch (err) {
       console.error('Error updating marked cells:', err);
+    }
+  };
+
+  // Declarar o Cantar Línea
+  const callBingoLine = async () => {
+    if (!playerId || !roomId || bingoLineCalled || bingoLineWinner || submittingBingoLineCall) return;
+    setSubmittingBingoLineCall(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('players')
+        .update({ bingo_line_called: true })
+        .eq('id', playerId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setBingoLineCalled(true);
+        confetti({
+          particleCount: 30,
+          spread: 50,
+          origin: { y: 0.8 }
+        });
+      }
+    } catch (err: any) {
+      alert('Error al cantar Línea: ' + err.message);
+    } finally {
+      setSubmittingBingoLineCall(false);
     }
   };
 
@@ -1192,13 +1230,43 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                   })}
                 </div>
 
-                {/* Botón de Cantar Bingo */}
-                <div className="mt-2 text-center">
+                 {/* Botones de Cantar Línea y Cantar Bingo */}
+                <div className="mt-3 flex flex-col gap-2.5 text-center">
+                  {/* BOTÓN LÍNEA */}
+                  {!bingoLineWinner ? (
+                    !bingoLineCalled ? (
+                      <button
+                        onClick={callBingoLine}
+                        disabled={submittingBingoLineCall || bingoWinner}
+                        className="w-full bg-zinc-900 hover:bg-zinc-850 text-amber-400 font-bold py-3 rounded-xl border border-amber-500/30 hover:border-amber-500/60 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {submittingBingoLineCall ? (
+                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-amber-500 border-t-transparent"></span>
+                        ) : (
+                          <>
+                            <Radio className="w-4 h-4" />
+                            ¡CANTAR LÍNEA!
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="w-full py-3 px-4 bg-zinc-950/60 border border-amber-500/20 rounded-xl text-center text-xs font-bold text-amber-500/80 flex items-center justify-center gap-2 animate-pulse">
+                        <Radio className="w-3.5 h-3.5 text-amber-500/70 animate-ping" />
+                        Línea Cantada - Esperando Admin
+                      </div>
+                    )
+                  ) : (
+                    <div className="w-full py-3 px-4 bg-neon-green/10 border border-neon-green/30 rounded-xl text-center text-xs font-bold text-neon-green flex items-center justify-center gap-2">
+                      <span>✓ ¡Línea de Bingo Ganada (+10 pts)!</span>
+                    </div>
+                  )}
+
+                  {/* BOTÓN BINGO */}
                   {!bingoCalled ? (
                     <button
                       onClick={callBingo}
                       disabled={submittingBingoCall}
-                      className="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 font-black py-4 rounded-2xl shadow-lg hover:shadow-amber-500/20 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2 text-base animate-pulse-glow"
+                      className="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 font-black py-4 rounded-xl shadow-lg hover:shadow-amber-500/20 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2 text-base animate-pulse-glow"
                     >
                       {submittingBingoCall ? (
                         <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-zinc-950 border-t-transparent"></span>
