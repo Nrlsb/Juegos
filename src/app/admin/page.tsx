@@ -109,11 +109,52 @@ export default function AdminPage() {
     setBuzzerQuestions(updated);
   };
 
-  // Cargar preguntas al montar el componente
+  // Cargar preguntas y restaurar sala al montar el componente
   useEffect(() => {
     fetchQuestions();
     fetchBuzzerQuestions();
+
+    const restoreRoom = async () => {
+      const savedRoomId = localStorage.getItem('admin_room_id');
+      if (savedRoomId) {
+        setLoading(true);
+        try {
+          const { data: existingRoom, error } = await supabase
+            .from('rooms')
+            .select('*')
+            .eq('id', savedRoomId)
+            .single();
+
+          if (existingRoom && !error) {
+            if (existingRoom.status !== 'FINISHED') {
+              setRoom(existingRoom);
+              if (existingRoom.status !== 'LOBBY') {
+                setGameStarted(true);
+              }
+            } else {
+              localStorage.removeItem('admin_room_id');
+            }
+          }
+        } catch (e) {
+          console.error('Error al restaurar sala:', e);
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+
+    restoreRoom();
   }, []);
+
+  // Sincronizar el índice de la pregunta actual con el ID de la pregunta en la sala restaurada
+  useEffect(() => {
+    if (room && questions.length > 0 && room.current_question_id) {
+      const idx = questions.findIndex(q => q.id === room.current_question_id);
+      if (idx !== -1) {
+        setCurrentQuestionIndex(idx);
+      }
+    }
+  }, [room?.current_question_id, questions]);
 
   // Sincronizar estado del reproductor de YouTube con Supabase
   const handleAdminPlayerStateChange = async (state: number) => {
@@ -661,6 +702,7 @@ export default function AdminPage() {
 
       if (error) throw error;
       setRoom(data);
+      localStorage.setItem('admin_room_id', data.id);
       setPlayers([]);
       setCurrentQuestionIndex(0);
       setGameStarted(false);
@@ -802,6 +844,7 @@ export default function AdminPage() {
         alert('Error al finalizar el juego: ' + error.message);
       } else {
         setRoom(data);
+        localStorage.removeItem('admin_room_id');
         // Lanzar confeti para celebrar
         triggerCelebration();
       }
@@ -1033,6 +1076,7 @@ export default function AdminPage() {
     
     setLoading(true);
     await supabase.from('rooms').delete().eq('id', room.id);
+    localStorage.removeItem('admin_room_id');
     setRoom(null);
     setPlayers([]);
     setGameStarted(false);
@@ -1447,6 +1491,7 @@ export default function AdminPage() {
       
       if (error) throw error;
       setRoom(data);
+      localStorage.removeItem('admin_room_id');
       triggerCelebration();
 
     } catch (err: any) {

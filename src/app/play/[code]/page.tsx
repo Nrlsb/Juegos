@@ -210,8 +210,6 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
     };
   }, [roomStatus, questionStartedAt, currentQuestionId]);
 
-
-
   // Inicializar estados iniciales
   const initGameSession = async (rId: string, pId: string) => {
     try {
@@ -221,7 +219,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         .select('*')
         .eq('id', rId)
         .single();
- 
+  
       if (roomData) {
         setRoomStatus(roomData.status);
         setCurrentQuestionId(roomData.current_question_id);
@@ -229,24 +227,26 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         setRoomBuzzerActive(roomData.buzzer_active || false);
         setRoomBuzzerQuestion(roomData.buzzer_question || '');
         setBingoSongsPlayed(roomData.bingo_songs_played || []);
- 
+  
         if ((roomData.status === 'QUESTION' || roomData.status === 'MUSIC') && roomData.current_question_id) {
           await fetchQuestion(roomData.current_question_id);
           // Verificar si ya había respondido esta pregunta
           await checkAlreadyAnswered(rId, pId, roomData.current_question_id);
         } else if (roomData.status === 'ANSWER' && roomData.current_question_id) {
-          await fetchQuestion(roomData.current_question_id);
-          await fetchQuestionResult(roomData.current_question_id);
+          const fetchedQ = await fetchQuestion(roomData.current_question_id);
+          await fetchQuestionResult(roomData.current_question_id, rId, pId, fetchedQ);
+        } else if (roomData.status === 'LEADERBOARD' || roomData.status === 'FINISHED') {
+          await fetchLeaderboard(rId, pId);
         }
       }
- 
+  
       // Obtener info del jugador
       const { data: playerData } = await supabase
         .from('players')
         .select('*')
         .eq('id', pId)
         .single();
- 
+  
       if (playerData) {
         setMyPlayerInfo(playerData);
         setBingoCard(playerData.bingo_card || null);
@@ -265,7 +265,11 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
       .select('*')
       .eq('id', qId)
       .single();
-    if (data) setActiveQuestion(data);
+    if (data) {
+      setActiveQuestion(data);
+      return data;
+    }
+    return null;
   };
 
   const checkAlreadyAnswered = async (rId: string, pId: string, qId: string) => {
@@ -331,15 +335,20 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
   };
 
   // Obtener el resultado de la pregunta actual
-  const fetchQuestionResult = async (qId: string | null) => {
-    if (!qId || !roomId || !playerId || !activeQuestion) return;
+  const fetchQuestionResult = async (qId: string | null, customRoomId?: string, customPlayerId?: string, customActiveQuestion?: any) => {
+    const activeQId = qId;
+    const activeRoomId = customRoomId || roomId;
+    const activePlayerId = customPlayerId || playerId;
+    const activeQ = customActiveQuestion || activeQuestion;
+
+    if (!activeQId || !activeRoomId || !activePlayerId || !activeQ) return;
 
     const { data, error } = await supabase
       .from('responses')
       .select('*')
-      .eq('room_id', roomId)
-      .eq('player_id', playerId)
-      .eq('question_id', qId)
+      .eq('room_id', activeRoomId)
+      .eq('player_id', activePlayerId)
+      .eq('question_id', activeQId)
       .maybeSingle();
 
     if (error) {
@@ -352,7 +361,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         answered: true,
         isCorrect: data.is_correct,
         pointsAwarded: data.points_awarded,
-        correctOptionIndex: activeQuestion.correct_option_index,
+        correctOptionIndex: activeQ.correct_option_index,
       });
 
       if (data.is_correct) {
@@ -368,24 +377,28 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         answered: false,
         isCorrect: false,
         pointsAwarded: 0,
-        correctOptionIndex: activeQuestion.correct_option_index,
+        correctOptionIndex: activeQ.correct_option_index,
       });
     }
   };
 
-  const fetchLeaderboard = async () => {
-    if (!roomId) return;
+  const fetchLeaderboard = async (customRoomId?: string, customPlayerId?: string) => {
+    const activeRoomId = customRoomId || roomId;
+    const activePlayerId = customPlayerId || playerId;
+    if (!activeRoomId) return;
     const { data } = await supabase
       .from('players')
       .select('*')
-      .eq('room_id', roomId)
+      .eq('room_id', activeRoomId)
       .order('score', { ascending: false });
     
     if (data) {
       setPlayersList(data);
       // Buscar información propia actualizada
-      const me = data.find(p => p.id === playerId);
-      if (me) setMyPlayerInfo(me);
+      if (activePlayerId) {
+        const me = data.find(p => p.id === activePlayerId);
+        if (me) setMyPlayerInfo(me);
+      }
     }
   };
 
