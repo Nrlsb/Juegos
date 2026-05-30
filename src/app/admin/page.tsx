@@ -37,6 +37,12 @@ export default function AdminPage() {
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Estados para crear una nueva pregunta
+  const [newQuestionText, setNewQuestionText] = useState('');
+  const [newOptions, setNewOptions] = useState(['', '', '', '']);
+  const [newCorrectIndex, setNewCorrectIndex] = useState(0);
+  const [addingQuestion, setAddingQuestion] = useState(false);
+
   // Cargar preguntas al montar el componente
   useEffect(() => {
     fetchQuestions();
@@ -200,6 +206,62 @@ export default function AdminPage() {
       alert('Ya existen preguntas en la base de datos.');
     }
     setLoading(false);
+  };
+
+  // Agregar una nueva pregunta a Supabase
+  const handleAddQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newQuestionText.trim() || newOptions.some(opt => !opt.trim())) {
+      alert('Por favor completa el texto de la pregunta y todas las opciones.');
+      return;
+    }
+
+    setAddingQuestion(true);
+    try {
+      const { data, error } = await supabase
+        .from('questions')
+        .insert([{
+          question_text: newQuestionText.trim(),
+          options: newOptions.map(o => o.trim()),
+          correct_option_index: newCorrectIndex
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Actualizar el listado local de preguntas
+      setQuestions(prev => [...prev, data]);
+
+      // Limpiar formulario
+      setNewQuestionText('');
+      setNewOptions(['', '', '', '']);
+      setNewCorrectIndex(0);
+      alert('¡Pregunta guardada exitosamente!');
+    } catch (err: any) {
+      alert('Error al guardar la pregunta: ' + err.message);
+    } finally {
+      setAddingQuestion(false);
+    }
+  };
+
+  // Eliminar una pregunta de Supabase
+  const handleDeleteQuestion = async (id: string) => {
+    if (!confirm('¿Estás seguro de que deseas eliminar esta pregunta?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('questions')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // Actualizar el estado local
+      setQuestions(prev => prev.filter(q => q.id !== id));
+    } catch (err: any) {
+      alert('Error al eliminar la pregunta: ' + err.message);
+    }
   };
 
   // Crear una nueva sala
@@ -485,29 +547,176 @@ export default function AdminPage() {
       {/* CONTENIDO PRINCIPAL */}
       <main className="flex-1 flex flex-col items-center justify-center max-w-5xl w-full mx-auto">
         {!room ? (
-          /* PANTALLA CREAR SALA */
-          <div className="text-center max-w-md w-full glass-panel p-8 rounded-3xl neon-border-blue animate-float">
-            <div className="w-16 h-16 bg-neon-blue/15 rounded-2xl mb-6 mx-auto flex items-center justify-center border border-neon-blue/30 shadow-lg shadow-neon-blue/10">
-              <Play className="w-8 h-8 text-neon-blue fill-neon-blue" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Crear nueva Sala de Juego</h2>
-            <p className="text-zinc-400 text-sm mb-6">
-              Inicia una sala para que los jugadores se unan con sus teléfonos móviles.
-            </p>
-            <button
-              onClick={createRoom}
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-neon-blue to-neon-purple text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-neon-blue/30 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></span>
-              ) : (
-                'Crear Sala de Trivia'
+          /* CONFIGURACIÓN Y PREPARACIÓN INICIAL (SIN SALA) */
+          <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            
+            {/* PANEL IZQUIERDO: CREAR SALA */}
+            <div className="lg:col-span-5 text-center glass-panel p-8 rounded-3xl neon-border-blue flex flex-col justify-center items-center h-full min-h-[380px]">
+              <div className="w-16 h-16 bg-neon-blue/15 rounded-2xl mb-6 mx-auto flex items-center justify-center border border-neon-blue/30 shadow-lg shadow-neon-blue/10">
+                <Play className="w-8 h-8 text-neon-blue fill-neon-blue" />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">Crear nueva Sala</h2>
+              <p className="text-zinc-400 text-sm mb-8">
+                Inicia una sala para que los jugadores se unan con sus teléfonos móviles.
+              </p>
+              <button
+                onClick={createRoom}
+                disabled={loading}
+                className="w-full bg-gradient-to-r from-neon-blue to-neon-purple text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-neon-blue/30 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></span>
+                ) : (
+                  'Crear Sala de Trivia'
+                )}
+              </button>
+              <p className="text-xs text-zinc-500 mt-6">
+                Preguntas disponibles: <span className="text-neon-blue font-bold">{questions.length}</span>
+              </p>
+              {questions.length === 0 && (
+                <button
+                  onClick={generateSeedQuestions}
+                  disabled={loading}
+                  className="mt-4 text-xs font-semibold text-neon-blue hover:text-neon-pink transition flex items-center gap-1.5 cursor-pointer bg-zinc-800/60 hover:bg-zinc-800 py-2 px-3 rounded-lg border border-zinc-700"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Cargar Preguntas Semilla
+                </button>
               )}
-            </button>
-            <p className="text-[10px] text-zinc-500 mt-4">
-              Preguntas cargadas actualmente: <span className="text-neon-blue font-bold">{questions.length}</span>
-            </p>
+            </div>
+
+            {/* PANEL DERECHO: GESTIÓN DE PREGUNTAS */}
+            <div className="lg:col-span-7 flex flex-col gap-6 w-full">
+              
+              {/* CREAR PREGUNTA */}
+              <div className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20">
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-neon-pink" />
+                  Agregar Nueva Pregunta
+                </h3>
+                
+                <form onSubmit={handleAddQuestion} className="space-y-4">
+                  <div>
+                    <label className="text-xs text-zinc-400 font-semibold block mb-1">Texto de la Pregunta</label>
+                    <input 
+                      type="text"
+                      value={newQuestionText}
+                      onChange={(e) => setNewQuestionText(e.target.value)}
+                      placeholder="Ej: ¿Cuál es el río más largo del mundo?"
+                      className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/20 transition"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {newOptions.map((opt, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs text-zinc-400 font-semibold">
+                            Opción {String.fromCharCode(65 + idx)}
+                          </label>
+                          <label className="text-[10px] text-zinc-400 hover:text-neon-green flex items-center gap-1 cursor-pointer transition select-none">
+                            <input 
+                              type="radio" 
+                              name="correctOption"
+                              checked={newCorrectIndex === idx}
+                              onChange={() => setNewCorrectIndex(idx)}
+                              className="accent-neon-green"
+                            />
+                            ¿Correcta?
+                          </label>
+                        </div>
+                        <input 
+                          type="text"
+                          value={opt}
+                          onChange={(e) => {
+                            const updated = [...newOptions];
+                            updated[idx] = e.target.value;
+                            setNewOptions(updated);
+                          }}
+                          placeholder={`Opción ${String.fromCharCode(65 + idx)}`}
+                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2 px-3 text-white text-xs focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/10 transition"
+                          required
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="submit"
+                      disabled={addingQuestion}
+                      className="bg-gradient-to-r from-neon-blue to-neon-purple hover:shadow-neon-blue/20 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition cursor-pointer active:scale-95 disabled:opacity-50"
+                    >
+                      {addingQuestion ? 'Guardando...' : 'Guardar Pregunta'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* LISTA DE PREGUNTAS */}
+              <div className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20 max-h-[350px] overflow-hidden flex flex-col">
+                <h3 className="text-lg font-bold text-white mb-3 flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <HelpCircle className="w-5 h-5 text-neon-blue" />
+                    Preguntas Existentes ({questions.length})
+                  </span>
+                  {questions.length > 0 && (
+                    <button 
+                      onClick={async () => {
+                        if (confirm('¿Estás seguro de que deseas eliminar TODAS las preguntas?')) {
+                          const { error } = await supabase.from('questions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                          if (error) {
+                            alert('Error al vaciar: ' + error.message);
+                          } else {
+                            fetchQuestions();
+                            alert('¡Preguntas eliminadas correctamente!');
+                          }
+                        }
+                      }}
+                      className="text-[10px] text-neon-red hover:underline cursor-pointer font-bold uppercase tracking-wider transition"
+                    >
+                      Eliminar Todas
+                    </button>
+                  )}
+                </h3>
+
+                <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                  {questions.map((q, idx) => (
+                    <div key={q.id} className="p-3 bg-zinc-950/40 border border-zinc-900 rounded-xl flex justify-between items-start hover:border-zinc-800 transition">
+                      <div className="flex-1 min-w-0 pr-4">
+                        <p className="text-sm font-semibold text-white truncate">{idx + 1}. {q.question_text}</p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1.5">
+                          {q.options.map((opt, oIdx) => (
+                            <span 
+                              key={oIdx} 
+                              className={`text-[10px] truncate ${oIdx === q.correct_option_index ? 'text-neon-green font-bold' : 'text-zinc-500'}`}
+                            >
+                              {String.fromCharCode(65 + oIdx)}) {opt}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteQuestion(q.id)}
+                        className="text-zinc-600 hover:text-neon-red p-1 transition cursor-pointer"
+                        title="Eliminar pregunta"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {questions.length === 0 && (
+                    <div className="text-center py-8 text-zinc-600">
+                      <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      <p className="text-xs">No hay preguntas cargadas en la base de datos.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
           </div>
         ) : (
           /* SALA ACTIVA */
