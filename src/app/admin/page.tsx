@@ -4,7 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   Users, Play, Award, RotateCcw, Volume2, Plus, 
-  HelpCircle, CheckCircle, BarChart3, Trophy, ArrowRight, Trash2, ShieldAlert
+  HelpCircle, CheckCircle, BarChart3, Trophy, ArrowRight, Trash2, ShieldAlert,
+  Zap, Radio
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -19,6 +20,7 @@ interface Player {
   id: string;
   nickname: string;
   score: number;
+  buzzed_at?: string | null;
 }
 
 interface ResponseCount {
@@ -42,6 +44,10 @@ export default function AdminPage() {
   const [newOptions, setNewOptions] = useState(['', '', '', '']);
   const [newCorrectIndex, setNewCorrectIndex] = useState(0);
   const [addingQuestion, setAddingQuestion] = useState(false);
+
+  // Estados para el Modo Pulsador
+  const [buzzerQuestionInput, setBuzzerQuestionInput] = useState('');
+  const [pointsToAwardInput, setPointsToAwardInput] = useState('100');
 
   // Cargar preguntas al montar el componente
   useEffect(() => {
@@ -460,6 +466,207 @@ export default function AdminPage() {
     setLoading(false);
   };
 
+  // Cambiar el estado de la sala (e.g., ir a Modo Pulsador)
+  const changeRoomStatus = async (newStatus: string) => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      const updates: any = { 
+        status: newStatus 
+      };
+      
+      // Si cambia a LOBBY, resetea estados de trivia y de buzzer
+      if (newStatus === 'LOBBY') {
+        updates.current_question_id = null;
+        updates.question_started_at = null;
+        updates.buzzer_active = false;
+        updates.buzzer_question = null;
+      } else if (newStatus === 'BUZZER') {
+        updates.buzzer_active = false;
+        updates.buzzer_question = '';
+      }
+
+      const { data, error } = await supabase
+        .from('rooms')
+        .update(updates)
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+      
+      // Limpiar pulsaciones de jugadores al cambiar de modo
+      if (newStatus === 'BUZZER' || newStatus === 'LOBBY') {
+        await supabase
+          .from('players')
+          .update({ buzzed_at: null })
+          .eq('room_id', room.id);
+        
+        // Actualizar la lista local
+        setPlayers(prev => prev.map(p => ({ ...p, buzzed_at: null })));
+      }
+    } catch (err: any) {
+      alert('Error al cambiar de modo: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Activar Pulsadores
+  const activateBuzzers = async () => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      // 1. Limpiar pulsaciones de todos los jugadores en la base de datos
+      const { error: resetError } = await supabase
+        .from('players')
+        .update({ buzzed_at: null })
+        .eq('room_id', room.id);
+
+      if (resetError) throw resetError;
+
+      // 2. Activar el pulsador y guardar la pregunta en la sala
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          buzzer_active: true,
+          buzzer_question: buzzerQuestionInput.trim() || null,
+          question_started_at: new Date().toISOString()
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+      
+      // Resetear la lista local de jugadores (limpiar buzzed_at)
+      setPlayers(prev => prev.map(p => ({ ...p, buzzed_at: null })));
+    } catch (err: any) {
+      alert('Error al activar pulsadores: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Bloquear / Desactivar Pulsadores sin reiniciar
+  const disableBuzzers = async () => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({ buzzer_active: false })
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+    } catch (err: any) {
+      alert('Error al desactivar pulsadores: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reiniciar Pulsadores para una nueva ronda
+  const resetBuzzers = async () => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      // Limpiar pulsaciones en la BD
+      const { error: resetError } = await supabase
+        .from('players')
+        .update({ buzzed_at: null })
+        .eq('room_id', room.id);
+
+      if (resetError) throw resetError;
+
+      // Desactivar el pulsador en la sala
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          buzzer_active: false,
+          buzzer_question: ''
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+      setBuzzerQuestionInput('');
+      setPlayers(prev => prev.map(p => ({ ...p, buzzed_at: null })));
+    } catch (err: any) {
+      alert('Error al reiniciar pulsadores: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Limpiar la pulsación de un jugador individual (por ejemplo, si responde mal y queremos que otros tengan oportunidad)
+  const clearPlayerBuzzer = async (playerId: string) => {
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('players')
+        .update({ buzzed_at: null })
+        .eq('id', playerId);
+
+      if (error) throw error;
+
+      // Actualizar la lista local
+      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, buzzed_at: null } : p));
+    } catch (err: any) {
+      alert('Error al limpiar pulsación: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dar puntos al jugador que pulsó
+  const awardBuzzerPoints = async (playerId: string, points: number) => {
+    setLoading(true);
+    try {
+      const player = players.find(p => p.id === playerId);
+      if (!player) return;
+
+      const newScore = player.score + points;
+
+      const { error } = await supabase
+        .from('players')
+        .update({ score: newScore })
+        .eq('id', playerId);
+
+      if (error) throw error;
+
+      // Actualizar la lista local
+      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, score: newScore } : p));
+      
+      // Sonido de éxito
+      try {
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+      } catch (e) {}
+
+      alert(`¡Se otorgaron ${points} puntos a ${player.nickname}!`);
+    } catch (err: any) {
+      alert('Error al otorgar puntos: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const triggerCelebration = () => {
     const duration = 5 * 1000;
     const animationEnd = Date.now() + duration;
@@ -533,13 +740,33 @@ export default function AdminPage() {
           )}
           
           {room && (
-            <button
-              onClick={deleteRoom}
-              disabled={loading}
-              className="bg-neon-red/10 hover:bg-neon-red/20 text-neon-red border border-neon-red/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Cerrar Sala
-            </button>
+            <div className="flex items-center gap-2">
+              {room.status === 'BUZZER' ? (
+                <button
+                  onClick={() => changeRoomStatus('LOBBY')}
+                  disabled={loading}
+                  className="bg-neon-blue/15 hover:bg-neon-blue/25 text-neon-blue border border-neon-blue/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trophy className="w-3.5 h-3.5" /> Volver a Trivia
+                </button>
+              ) : (
+                <button
+                  onClick={() => changeRoomStatus('BUZZER')}
+                  disabled={loading}
+                  className="bg-neon-pink/15 hover:bg-neon-pink/25 text-neon-pink border border-neon-pink/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Zap className="w-3.5 h-3.5 animate-pulse" /> Modo Pulsador
+                </button>
+              )}
+              
+              <button
+                onClick={deleteRoom}
+                disabled={loading}
+                className="bg-neon-red/10 hover:bg-neon-red/20 text-neon-red border border-neon-red/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Cerrar Sala
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -1014,6 +1241,202 @@ export default function AdminPage() {
                       Jugar de nuevo
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* ESTADO MODO PULSADOR (BUZZER) */}
+              {room.status === 'BUZZER' && (
+                <div className="glass-panel p-8 rounded-3xl border-zinc-700/80 flex-1 flex flex-col relative">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-neon-pink to-neon-purple"></div>
+                  
+                  <div className="flex justify-between items-center mb-6">
+                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Radio className="w-4 h-4 text-neon-pink animate-pulse" /> Modo Pulsador Activo
+                    </span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1 ${
+                      room.buzzer_active 
+                        ? 'bg-neon-green/10 text-neon-green border-neon-green/20' 
+                        : 'bg-neon-red/10 text-neon-red border-neon-red/20'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full mr-1 ${room.buzzer_active ? 'bg-neon-green animate-ping' : 'bg-neon-red'}`} />
+                      {room.buzzer_active ? 'Pulsadores Activos' : 'Bloqueado'}
+                    </span>
+                  </div>
+
+                  {!room.buzzer_active && (!players.some(p => p.buzzed_at)) ? (
+                    /* CONFIGURACIÓN Y ACTIVACIÓN DEL PULSADOR */
+                    <div className="flex-1 flex flex-col justify-center my-4 space-y-6">
+                      <div className="text-center">
+                        <h2 className="text-2xl font-bold text-white mb-2">Preparar Ronda de Pulsador</h2>
+                        <p className="text-zinc-400 text-sm">
+                          Escribe una pregunta para mostrar en las pantallas de los jugadores, o hazla oralmente.
+                        </p>
+                      </div>
+
+                      <div className="space-y-4 max-w-md w-full mx-auto">
+                        <div className="space-y-1">
+                          <label className="text-xs text-zinc-400 font-semibold block">Pregunta a realizar (Opcional)</label>
+                          <input 
+                            type="text"
+                            value={buzzerQuestionInput}
+                            onChange={(e) => setBuzzerQuestionInput(e.target.value)}
+                            placeholder="Ej: ¿Cuál es la capital de Italia?"
+                            className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
+                          />
+                        </div>
+
+                        <button
+                          onClick={activateBuzzers}
+                          disabled={loading}
+                          className="w-full bg-gradient-to-r from-neon-pink to-neon-purple text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-neon-pink/30 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          {loading ? (
+                            <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></span>
+                          ) : (
+                            <>
+                              <Zap className="w-5 h-5 text-white" />
+                              Activar Pulsadores para Responder
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* RESULTADOS DEL PULSADOR EN TIEMPO REAL */
+                    <div className="flex-1 flex flex-col my-4">
+                      {room.buzzer_question && (
+                        <div className="bg-zinc-950/50 border border-zinc-900 p-4 rounded-2xl mb-6 text-center">
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Pregunta en pantalla</span>
+                          <p className="text-lg font-bold text-white leading-snug">"{room.buzzer_question}"</p>
+                        </div>
+                      )}
+
+                      {/* Quien fue el primero en presionar */}
+                      {players.filter(p => p.buzzed_at).length > 0 ? (
+                        <div className="space-y-6">
+                          {(() => {
+                            const buzzedPlayers = players
+                              .filter(p => p.buzzed_at)
+                              .sort((a, b) => new Date(a.buzzed_at!).getTime() - new Date(b.buzzed_at!).getTime());
+                            
+                            return (
+                              <>
+                                {/* Primero en presionar - DESTACADO */}
+                                <div className="glass-panel p-6 rounded-2xl border border-neon-green/40 shadow-lg shadow-neon-green/5 relative overflow-hidden text-center">
+                                  <div className="absolute top-0 right-0 p-2 bg-neon-green/10 text-neon-green rounded-bl-xl text-xs font-mono font-bold border-l border-b border-neon-green/20 animate-pulse">
+                                    ¡1º EN PULSAR!
+                                  </div>
+                                  
+                                  <span className="text-zinc-400 text-xs font-bold uppercase tracking-wider block mb-1">Ganó la palabra:</span>
+                                  <h3 className="text-3xl font-black text-white neon-glow-green mb-4">
+                                    {buzzedPlayers[0].nickname}
+                                  </h3>
+
+                                  {/* Controles para otorgar puntos al primer jugador */}
+                                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 bg-zinc-950/40 p-4 rounded-xl border border-zinc-900 max-w-sm mx-auto">
+                                    <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block whitespace-nowrap">Pts:</span>
+                                      <input 
+                                        type="number"
+                                        value={pointsToAwardInput}
+                                        onChange={(e) => setPointsToAwardInput(e.target.value)}
+                                        className="w-16 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-center text-xs font-bold text-neon-green font-mono"
+                                        min={1}
+                                      />
+                                    </div>
+                                    <div className="flex gap-2 w-full">
+                                      <button
+                                        onClick={() => awardBuzzerPoints(buzzedPlayers[0].id, Number(pointsToAwardInput))}
+                                        disabled={loading}
+                                        className="flex-1 bg-neon-green/20 hover:bg-neon-green/30 text-neon-green border border-neon-green/30 font-bold text-xs py-2 px-3 rounded-lg transition cursor-pointer flex items-center justify-center gap-1"
+                                      >
+                                        ✓ Correcto
+                                      </button>
+                                      <button
+                                        onClick={() => clearPlayerBuzzer(buzzedPlayers[0].id)}
+                                        disabled={loading}
+                                        className="bg-neon-red/20 hover:bg-neon-red/30 text-neon-red border border-neon-red/30 font-bold text-xs py-2 px-3 rounded-lg transition cursor-pointer flex items-center justify-center gap-1"
+                                        title="Marcar incorrecto y pasar al siguiente en la lista"
+                                      >
+                                        ✗ Incorrecto
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Lista completa de los que pulsaron */}
+                                {buzzedPlayers.length > 1 && (
+                                  <div className="space-y-2">
+                                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Orden de llegada</h4>
+                                    <div className="max-h-[150px] overflow-y-auto space-y-2 pr-1">
+                                      {buzzedPlayers.slice(1).map((player, idx) => {
+                                        const diffMs = new Date(player.buzzed_at!).getTime() - new Date(buzzedPlayers[0].buzzed_at!).getTime();
+                                        const diffSec = (diffMs / 1000).toFixed(2);
+                                        return (
+                                          <div key={player.id} className="p-3 bg-zinc-950/40 border border-zinc-900 rounded-xl flex items-center justify-between hover:border-zinc-800 transition">
+                                            <div className="flex items-center gap-2">
+                                              <span className="w-5 h-5 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center font-mono font-bold text-xs text-zinc-400">
+                                                #{idx + 2}
+                                              </span>
+                                              <span className="font-bold text-zinc-300 text-sm">{player.nickname}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-mono text-xs text-zinc-500">+{diffSec}s</span>
+                                              <button
+                                                onClick={() => clearPlayerBuzzer(player.id)}
+                                                disabled={loading}
+                                                className="text-zinc-600 hover:text-neon-red p-1 transition cursor-pointer"
+                                                title="Quitar de la lista"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 text-zinc-500 flex flex-col items-center justify-center gap-4">
+                          <div className="w-16 h-16 bg-neon-pink/5 rounded-full border border-neon-pink/15 flex items-center justify-center animate-pulse">
+                            <Radio className="w-8 h-8 text-neon-pink animate-ping" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white">Pulsadores habilitados...</p>
+                            <p className="text-xs text-zinc-500 mt-1">Los jugadores tienen el botón de responder en sus móviles.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-auto pt-6 border-t border-zinc-800/80 flex flex-wrap justify-between items-center gap-4">
+                        <span className="text-xs text-zinc-500 font-bold uppercase tracking-wider">
+                          Pulsados: <strong className="text-white">{players.filter(p => p.buzzed_at).length} / {players.length}</strong>
+                        </span>
+
+                        <div className="flex gap-2">
+                          {room.buzzer_active && (
+                            <button
+                              onClick={disableBuzzers}
+                              className="px-4 py-2 bg-zinc-900 hover:bg-zinc-850 text-zinc-300 font-semibold rounded-xl border border-zinc-800 text-xs transition cursor-pointer"
+                            >
+                              Bloquear Pulsadores
+                            </button>
+                          )}
+                          <button
+                            onClick={resetBuzzers}
+                            className="px-4 py-2 bg-neon-pink/10 hover:bg-neon-pink/20 text-neon-pink font-bold rounded-xl border border-neon-pink/20 text-xs transition cursor-pointer"
+                          >
+                            Reiniciar Pulsadores
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

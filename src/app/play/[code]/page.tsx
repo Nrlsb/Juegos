@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { 
   Gamepad2, Clock, CheckCircle2, XCircle, Trophy, 
-  Sparkles, HelpCircle, LogOut, AlertTriangle 
+  Sparkles, HelpCircle, LogOut, AlertTriangle, Radio, Zap
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -20,6 +20,7 @@ interface Player {
   id: string;
   nickname: string;
   score: number;
+  buzzed_at?: string | null;
 }
 
 export default function PlayPage({ params }: { params: Promise<{ code: string }> }) {
@@ -48,6 +49,11 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
     pointsAwarded: number;
     correctOptionIndex: number;
   } | null>(null);
+
+  // Estados para el Modo Pulsador
+  const [roomBuzzerActive, setRoomBuzzerActive] = useState(false);
+  const [roomBuzzerQuestion, setRoomBuzzerQuestion] = useState('');
+  const [pressingBuzzer, setPressingBuzzer] = useState(false);
 
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -93,6 +99,8 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
           setRoomStatus(updatedRoom.status);
           setCurrentQuestionId(updatedRoom.current_question_id);
           setQuestionStartedAt(updatedRoom.question_started_at);
+          setRoomBuzzerActive(updatedRoom.buzzer_active || false);
+          setRoomBuzzerQuestion(updatedRoom.buzzer_question || '');
 
           if (updatedRoom.status === 'QUESTION' && updatedRoom.current_question_id) {
             // Se lanzó una nueva pregunta: resetear estados locales y cargarla
@@ -185,6 +193,8 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         setRoomStatus(roomData.status);
         setCurrentQuestionId(roomData.current_question_id);
         setQuestionStartedAt(roomData.question_started_at);
+        setRoomBuzzerActive(roomData.buzzer_active || false);
+        setRoomBuzzerQuestion(roomData.buzzer_question || '');
 
         if (roomData.status === 'QUESTION' && roomData.current_question_id) {
           await fetchQuestion(roomData.current_question_id);
@@ -347,6 +357,61 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
       spread: 80,
       origin: { y: 0.6 }
     });
+  };
+
+  // Enviar pulsación del Modo Pulsador
+  const handlePressBuzzer = async () => {
+    if (pressingBuzzer || !playerId || !roomId || !roomBuzzerActive) return;
+    if (myPlayerInfo?.buzzed_at) return;
+
+    setPressingBuzzer(true);
+
+    // Sonido de pulsador local (audio sintetizado usando Web Audio API)
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+
+      oscillator.type = 'sawtooth';
+      oscillator.frequency.setValueAtTime(180, audioCtx.currentTime); // Sonido grave de pulsador
+      
+      gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.3);
+    } catch (e) {}
+
+    try {
+      const { data, error } = await supabase
+        .from('players')
+        .update({ buzzed_at: new Date().toISOString() })
+        .eq('id', playerId)
+        .is('buzzed_at', null) // Solo si no ha pulsado todavía
+        .select()
+        .single();
+
+      if (error) {
+        console.error(error);
+        alert('Error al presionar el pulsador. Inténtalo de nuevo.');
+      } else if (data) {
+        setMyPlayerInfo(data);
+        
+        // Lanzar una pequeña explosión de confeti para diversión del jugador
+        confetti({
+          particleCount: 20,
+          spread: 30,
+          origin: { y: 0.8 }
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setPressingBuzzer(false);
+    }
   };
 
   const handleExit = () => {
@@ -669,6 +734,78 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
             >
               Volver a Jugar
             </button>
+          </div>
+        )}
+
+        {/* ============================================================
+            6. PANTALLA: MODO PULSADOR (BUZZER)
+            ============================================================ */}
+        {roomStatus === 'BUZZER' && (
+          <div className="w-full flex-1 flex flex-col justify-center items-center py-4">
+            {roomBuzzerQuestion && (
+              <div className="w-full bg-zinc-950/60 border border-zinc-900 p-6 rounded-2xl mb-8 text-center">
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest block mb-1">Pregunta del Administrador</span>
+                <h2 className="text-xl font-extrabold text-white leading-snug">
+                  {roomBuzzerQuestion}
+                </h2>
+              </div>
+            )}
+
+            {!roomBuzzerActive ? (
+              /* PULSADORES INACTIVOS / BLOQUEADOS */
+              <div className="w-full glass-panel p-8 rounded-3xl border-zinc-800 text-center my-auto">
+                <div className="w-16 h-16 bg-neon-red/10 border border-neon-red/20 rounded-full mx-auto mb-4 flex items-center justify-center">
+                  <Radio className="w-8 h-8 text-neon-red animate-pulse" />
+                </div>
+                <h3 className="text-lg font-bold text-white mb-2">Pulsador Bloqueado</h3>
+                <p className="text-zinc-400 text-sm mb-6">
+                  {myPlayerInfo?.buzzed_at 
+                    ? "Ronda terminada. Espera a que el administrador limpie las respuestas."
+                    : "El administrador aún no ha habilitado las respuestas para esta pregunta."
+                  }
+                </p>
+                <div className="inline-flex items-center gap-2 px-5 py-3 rounded-full bg-zinc-950/60 border border-zinc-900 text-xs text-zinc-500 font-semibold uppercase tracking-wider">
+                  <span className="w-2.5 h-2.5 rounded-full bg-neon-red"></span>
+                  Esperando activación...
+                </div>
+              </div>
+            ) : myPlayerInfo?.buzzed_at ? (
+              /* YA PULSÓ */
+              <div className="w-full glass-panel p-8 rounded-3xl border-neon-green/30 text-center my-auto animate-float">
+                <div className="w-20 h-20 bg-neon-green/15 border border-neon-green/30 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-neon-green/10">
+                  <Zap className="w-10 h-10 text-neon-green animate-bounce" />
+                </div>
+                <h3 className="text-2xl font-black text-neon-green mb-2">¡PULSADO!</h3>
+                <p className="text-zinc-300 text-sm mb-4">
+                  Tu pulsación fue registrada con éxito.
+                </p>
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest animate-pulse">
+                  Mira la pantalla principal para ver el orden
+                </span>
+              </div>
+            ) : (
+              /* PULSADOR ACTIVO PARA PRESIONAR */
+              <div className="flex flex-col items-center justify-center my-auto space-y-8">
+                <div className="text-center">
+                  <span className="text-xs uppercase font-extrabold tracking-widest text-neon-pink mb-1 block">Modo Pulsador</span>
+                  <h3 className="text-lg font-bold text-zinc-300">¡Sé el primero en presionar para responder!</h3>
+                </div>
+
+                {/* BOTÓN MÓVIL DEL PULSADOR GIGANTE */}
+                <button
+                  onClick={handlePressBuzzer}
+                  disabled={pressingBuzzer}
+                  className="w-52 h-52 rounded-full bg-gradient-to-b from-neon-red via-[#e60000] to-[#990000] text-white font-black text-3xl tracking-wide shadow-[0_14px_0_#660000,0_20px_30px_rgba(255,49,49,0.4)] active:translate-y-3.5 active:shadow-[0_2px_0_#660000,0_4px_10px_rgba(255,49,49,0.2)] hover:scale-102 hover:brightness-110 active:scale-95 transition-all duration-75 cursor-pointer flex items-center justify-center border-4 border-zinc-950 select-none animate-pulse-glow"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <span className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">¡PULSAR!</span>
+                </button>
+
+                <p className="text-xs text-zinc-500 animate-pulse text-center">
+                  Toca la pantalla tan rápido como escuches la pregunta.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
