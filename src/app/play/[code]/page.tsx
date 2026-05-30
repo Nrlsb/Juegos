@@ -55,11 +55,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
   const [roomBuzzerQuestion, setRoomBuzzerQuestion] = useState('');
   const [pressingBuzzer, setPressingBuzzer] = useState(false);
 
-  // Estados para el Modo Música
-  const [musicVideoPlaying, setMusicVideoPlaying] = useState(false);
-  const [musicVideoTime, setMusicVideoTime] = useState(0);
-  const [audioEnabled, setAudioEnabled] = useState(false);
-  const playerRef = useRef<any>(null);
+
 
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -107,8 +103,6 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
           setQuestionStartedAt(updatedRoom.question_started_at);
           setRoomBuzzerActive(updatedRoom.buzzer_active || false);
           setRoomBuzzerQuestion(updatedRoom.buzzer_question || '');
-          setMusicVideoPlaying(updatedRoom.music_video_playing || false);
-          setMusicVideoTime(updatedRoom.music_video_time || 0);
 
           if ((updatedRoom.status === 'QUESTION' || updatedRoom.status === 'MUSIC') && updatedRoom.current_question_id) {
             // Se lanzó una nueva pregunta/canción: resetear estados locales y cargarla
@@ -187,111 +181,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
     };
   }, [roomStatus, questionStartedAt, currentQuestionId]);
 
-  // Controlar la reproducción de YouTube del cliente basándose en el estado de la sala
-  useEffect(() => {
-    if (!playerRef.current || !audioEnabled) return;
-    try {
-      const isPlaying = musicVideoPlaying;
-      const targetTime = musicVideoTime;
 
-      // Obtener el estado actual y tiempo actual del reproductor
-      const playerState = typeof playerRef.current.getPlayerState === 'function'
-        ? playerRef.current.getPlayerState()
-        : -1;
-
-      const ytTime = typeof playerRef.current.getCurrentTime === 'function'
-        ? playerRef.current.getCurrentTime()
-        : 0;
-
-      const timeDiff = Math.abs(ytTime - targetTime);
-
-      if (isPlaying) {
-        // YT.PlayerState: UNSTARTED = -1, PLAYING = 1, PAUSED = 2, BUFFERING = 3, CUED = 5
-        if (playerState !== 1 && playerState !== 3) {
-          playerRef.current.seekTo(targetTime, true);
-          playerRef.current.playVideo();
-        } else if (timeDiff > 3) {
-          // Si ya se está reproduciendo pero el desfase supera el umbral de tolerancia (3s), reposicionamos
-          playerRef.current.seekTo(targetTime, true);
-        }
-      } else {
-        // Pausar si actualmente está reproduciéndose o buffereando
-        if (playerState === 1 || playerState === 3) {
-          playerRef.current.pauseVideo();
-        }
-        // Si el tiempo difiere significativamente del objetivo, reposicionamos
-        if (timeDiff > 2) {
-          playerRef.current.seekTo(targetTime, true);
-        }
-      }
-    } catch (e) {
-      console.error('Error al controlar reproductor de audio:', e);
-    }
-  }, [musicVideoPlaying, musicVideoTime, audioEnabled]);
-
-  // Habilitar audio y montar reproductor en el cliente
-  const enableAudio = () => {
-    if ((window as any).YT && (window as any).YT.Player && !playerRef.current) {
-      initClientPlayer();
-    } else {
-      if (!(window as any).YT) {
-        const tag = document.createElement('script');
-        tag.src = 'https://www.youtube.com/iframe_api';
-        const firstScriptTag = document.getElementsByTagName('script')[0];
-        firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
-      }
-      (window as any).onYouTubeIframeAPIReady = () => {
-        initClientPlayer();
-      };
-      setTimeout(() => {
-        if ((window as any).YT && (window as any).YT.Player && !playerRef.current) {
-          initClientPlayer();
-        }
-      }, 1000);
-    }
-
-    function initClientPlayer() {
-      try {
-        playerRef.current = new (window as any).YT.Player('client-youtube-player', {
-          videoId: 'vLD_R65SvAQ',
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            modestbranding: 1,
-            rel: 0,
-            volume: 100
-          },
-          events: {
-            onReady: () => {
-              setAudioEnabled(true);
-              if (musicVideoPlaying) {
-                playerRef.current.seekTo(musicVideoTime, true);
-                playerRef.current.playVideo();
-              } else {
-                playerRef.current.seekTo(musicVideoTime, true);
-                playerRef.current.pauseVideo();
-              }
-            }
-          }
-        });
-      } catch (err) {
-        console.error('Error al crear reproductor de cliente:', err);
-      }
-    }
-  };
-
-  // Limpiar el reproductor al desmontar el componente
-  useEffect(() => {
-    return () => {
-      if (playerRef.current) {
-        try {
-          playerRef.current.destroy();
-        } catch (e) {}
-        playerRef.current = null;
-        setAudioEnabled(false);
-      }
-    };
-  }, []);
 
   // Inicializar estados iniciales
   const initGameSession = async (rId: string, pId: string) => {
@@ -309,8 +199,6 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         setQuestionStartedAt(roomData.question_started_at);
         setRoomBuzzerActive(roomData.buzzer_active || false);
         setRoomBuzzerQuestion(roomData.buzzer_question || '');
-        setMusicVideoPlaying(roomData.music_video_playing || false);
-        setMusicVideoTime(roomData.music_video_time || 0);
  
         if ((roomData.status === 'QUESTION' || roomData.status === 'MUSIC') && roomData.current_question_id) {
           await fetchQuestion(roomData.current_question_id);
@@ -930,20 +818,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         {roomStatus === 'MUSIC' && (
           <div className="w-full flex-1 flex flex-col justify-center items-center py-4">
             
-            {/* Elemento oculto para el reproductor de YouTube para sincronizar audio */}
-            <div className="hidden">
-              <div id="client-youtube-player"></div>
-            </div>
 
-            {!audioEnabled && activeQuestion && (
-              <button
-                onClick={enableAudio}
-                className="w-full bg-neon-green/20 border border-neon-green/45 hover:bg-neon-green/30 text-neon-green text-xs font-black py-3 px-4 rounded-xl flex items-center justify-center gap-2 mb-6 transition active:scale-[0.98] cursor-pointer"
-              >
-                <Radio className="w-4 h-4 animate-pulse text-neon-green" />
-                Habilitar Audio Sincronizado
-              </button>
-            )}
 
             {!activeQuestion ? (
               /* ESPERA DE SELECCIÓN DE CANCIÓN */
@@ -968,16 +843,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                     Adivina la Película
                   </span>
                   
-                  {audioEnabled ? (
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-neon-green/10 border border-neon-green/20 text-[10px] text-neon-green font-bold uppercase tracking-wider">
-                      <span className="w-2 h-2 rounded-full bg-neon-green animate-ping"></span>
-                      Audio en Vivo Habilitado
-                    </div>
-                  ) : (
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-neon-red/10 border border-neon-red/20 text-[10px] text-neon-red font-bold uppercase tracking-wider">
-                      Audio Silenciado
-                    </div>
-                  )}
+
 
                   <h2 className="text-lg font-bold text-zinc-300 mt-4 leading-snug">
                     ¿A qué película de Disney pertenece esta canción?

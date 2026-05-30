@@ -201,7 +201,7 @@ export default function AdminPage() {
         setPlayerReady(false);
       }
     };
-  }, [room?.status]);
+  }, [room?.id]);
 
   // Suscribirse a cambios en tiempo real una vez creada la sala
   useEffect(() => {
@@ -2533,8 +2533,8 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* MODO MÚSICA (ADIVINA LA CANCIÓN) */}
-              {room.status === 'MUSIC' && (
+              {/* MODO MÚSICA (ADIVINA LA CANCIÓN) - MANTENIDO EN EL DOM PARA EVITAR RECARGAR EL REPRODUCTOR */}
+              <div className={room.status === 'MUSIC' ? "w-full flex-1 flex flex-col" : "hidden"}>
                 <div className="glass-panel p-6 rounded-3xl border-zinc-800 flex-1 flex flex-col min-h-[480px]">
                   <div className="flex items-center justify-between pb-4 border-b border-zinc-800 mb-6">
                     <div>
@@ -2831,7 +2831,7 @@ export default function AdminPage() {
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
 
             </div>
 
