@@ -883,6 +883,7 @@ export default function AdminPage() {
       const { data, error } = await supabase
         .from('rooms')
         .update({
+          status: 'MUSIC',
           current_question_id: null,
           question_started_at: null,
           music_video_playing: false,
