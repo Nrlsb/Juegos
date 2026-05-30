@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   Users, Play, Award, RotateCcw, Volume2, Plus, 
   HelpCircle, CheckCircle, BarChart3, Trophy, ArrowRight, Trash2, ShieldAlert,
-  Zap, Radio
+  Zap, Radio, ArrowUp, ArrowDown, Search, X
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -48,6 +48,38 @@ export default function AdminPage() {
   // Estados para el Modo Pulsador
   const [buzzerQuestionInput, setBuzzerQuestionInput] = useState('');
   const [pointsToAwardInput, setPointsToAwardInput] = useState('100');
+  const [selectedBuzzerQuestionId, setSelectedBuzzerQuestionId] = useState<string | null>(null);
+  const [askedBuzzerQuestionIds, setAskedBuzzerQuestionIds] = useState<string[]>([]);
+  const [buzzerQuestions, setBuzzerQuestions] = useState<Question[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Sincronizar buzzerQuestions con las preguntas de la base de datos
+  useEffect(() => {
+    setBuzzerQuestions(prev => {
+      if (prev.length === 0) return questions;
+      const filtered = prev.filter(pq => questions.some(q => q.id === pq.id));
+      const newQuestions = questions.filter(q => !prev.some(pq => pq.id === q.id));
+      return [...filtered, ...newQuestions];
+    });
+  }, [questions]);
+
+  // Seleccionar una pregunta de la lista para el pulsador
+  const handleSelectBuzzerQuestion = (q: Question) => {
+    setSelectedBuzzerQuestionId(q.id);
+    setBuzzerQuestionInput(q.question_text);
+  };
+
+  // Mover una pregunta de posición en la lista del pulsador
+  const moveBuzzerQuestion = (index: number, direction: 'up' | 'down') => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= buzzerQuestions.length) return;
+    
+    const updated = [...buzzerQuestions];
+    const temp = updated[index];
+    updated[index] = updated[newIndex];
+    updated[newIndex] = temp;
+    setBuzzerQuestions(updated);
+  };
 
   // Cargar preguntas al montar el componente
   useEffect(() => {
@@ -541,6 +573,22 @@ export default function AdminPage() {
       if (error) throw error;
       setRoom(data);
       
+      // Registrar la pregunta como preguntada en el historial
+      const matchingQuestion = buzzerQuestions.find(
+        q => q.question_text.trim().toLowerCase() === buzzerQuestionInput.trim().toLowerCase()
+      );
+      if (matchingQuestion) {
+        setAskedBuzzerQuestionIds(prev => {
+          if (prev.includes(matchingQuestion.id)) return prev;
+          return [...prev, matchingQuestion.id];
+        });
+      } else if (selectedBuzzerQuestionId) {
+        setAskedBuzzerQuestionIds(prev => {
+          if (prev.includes(selectedBuzzerQuestionId)) return prev;
+          return [...prev, selectedBuzzerQuestionId];
+        });
+      }
+
       // Resetear la lista local de jugadores (limpiar buzzed_at)
       setPlayers(prev => prev.map(p => ({ ...p, buzzed_at: null })));
     } catch (err: any) {
@@ -598,6 +646,7 @@ export default function AdminPage() {
       if (error) throw error;
       setRoom(data);
       setBuzzerQuestionInput('');
+      setSelectedBuzzerQuestionId(null);
       setPlayers(prev => prev.map(p => ({ ...p, buzzed_at: null })));
     } catch (err: any) {
       alert('Error al reiniciar pulsadores: ' + err.message);
@@ -1265,51 +1314,252 @@ export default function AdminPage() {
 
                   {!room.buzzer_active && (!players.some(p => p.buzzed_at)) ? (
                     /* CONFIGURACIÓN Y ACTIVACIÓN DEL PULSADOR */
-                    <div className="flex-1 flex flex-col justify-center my-4 space-y-6">
+                    <div className="flex-1 flex flex-col my-4 space-y-6">
                       <div className="text-center">
-                        <h2 className="text-2xl font-bold text-white mb-2">Preparar Ronda de Pulsador</h2>
-                        <p className="text-zinc-400 text-sm">
-                          Escribe una pregunta para mostrar en las pantallas de los jugadores, o hazla oralmente.
+                        <h2 className="text-2xl font-bold text-white mb-1">Preparar Ronda de Pulsador</h2>
+                        <p className="text-zinc-400 text-xs">
+                          Selecciona una pregunta precargada o escribe una nueva a continuación.
                         </p>
                       </div>
 
-                      <div className="space-y-4 max-w-md w-full mx-auto">
-                        <div className="space-y-1">
-                          <label className="text-xs text-zinc-400 font-semibold block">Pregunta a realizar (Opcional)</label>
-                          <input 
-                            type="text"
-                            value={buzzerQuestionInput}
-                            onChange={(e) => setBuzzerQuestionInput(e.target.value)}
-                            placeholder="Ej: ¿Cuál es la capital de Italia?"
-                            className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
-                          />
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start text-left">
+                        {/* Columna de Pregunta Activa */}
+                        <div className="lg:col-span-5 space-y-4">
+                          <div className="space-y-1">
+                            <label className="text-xs text-zinc-400 font-semibold block">Pregunta a realizar (Opcional)</label>
+                            <input 
+                              type="text"
+                              value={buzzerQuestionInput}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setBuzzerQuestionInput(val);
+                                if (selectedBuzzerQuestionId) {
+                                  const selectedQuestion = buzzerQuestions.find(q => q.id === selectedBuzzerQuestionId);
+                                  if (selectedQuestion && selectedQuestion.question_text !== val) {
+                                    setSelectedBuzzerQuestionId(null);
+                                  }
+                                }
+                              }}
+                              placeholder="Ej: ¿Cuál es la capital de Italia?"
+                              className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
+                            />
+                          </div>
+
+                          {selectedBuzzerQuestionId ? (
+                            (() => {
+                              const selectedQuestion = buzzerQuestions.find(q => q.id === selectedBuzzerQuestionId);
+                              if (!selectedQuestion) return null;
+                              return (
+                                <div className="bg-zinc-950/80 border border-neon-pink/30 p-4 rounded-xl relative space-y-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedBuzzerQuestionId(null);
+                                      setBuzzerQuestionInput('');
+                                    }}
+                                    className="absolute top-2 right-2 text-zinc-500 hover:text-white transition cursor-pointer"
+                                    title="Quitar selección"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                  <span className="text-[10px] text-neon-pink font-bold uppercase tracking-wider block">Pregunta de la lista activa</span>
+                                  <p className="text-xs font-bold text-white pr-6 leading-snug">
+                                    {selectedQuestion.question_text}
+                                  </p>
+                                  <div className="space-y-1.5 pt-1.5 border-t border-zinc-900/60">
+                                    {selectedQuestion.options.map((opt, oIdx) => (
+                                      <div 
+                                        key={oIdx} 
+                                        className={`text-[10px] p-1.5 rounded flex items-center gap-2 ${
+                                          oIdx === selectedQuestion.correct_option_index 
+                                            ? 'bg-neon-green/10 border border-neon-green/20 text-neon-green font-bold' 
+                                            : 'bg-zinc-900/40 text-zinc-400 border border-transparent'
+                                        }`}
+                                      >
+                                        <span className="w-4 h-4 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[8px] font-bold">
+                                          {String.fromCharCode(65 + oIdx)}
+                                        </span>
+                                        <span className="truncate">{opt}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          ) : null}
+
+                          <button
+                            onClick={activateBuzzers}
+                            disabled={loading}
+                            className="w-full bg-gradient-to-r from-neon-pink to-neon-purple text-white font-bold py-3.5 rounded-xl shadow-lg hover:shadow-neon-pink/30 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
+                          >
+                            {loading ? (
+                              <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></span>
+                            ) : (
+                              <>
+                                <Zap className="w-5 h-5 text-white" />
+                                Activar Pulsadores
+                              </>
+                            )}
+                          </button>
                         </div>
 
-                        <button
-                          onClick={activateBuzzers}
-                          disabled={loading}
-                          className="w-full bg-gradient-to-r from-neon-pink to-neon-purple text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-neon-pink/30 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
-                        >
-                          {loading ? (
-                            <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></span>
-                          ) : (
-                            <>
-                              <Zap className="w-5 h-5 text-white" />
-                              Activar Pulsadores para Responder
-                            </>
-                          )}
-                        </button>
+                        {/* Columna de Banco de Preguntas precargadas */}
+                        <div className="lg:col-span-7 bg-zinc-950/20 border border-zinc-900 rounded-2xl p-4 flex flex-col h-[320px]">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <HelpCircle className="w-4 h-4 text-neon-blue" />
+                              Banco de Preguntas ({buzzerQuestions.length})
+                            </span>
+                            {askedBuzzerQuestionIds.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setAskedBuzzerQuestionIds([])}
+                                className="text-[9px] text-zinc-500 hover:text-neon-pink transition font-bold uppercase tracking-wider underline cursor-pointer"
+                              >
+                                Limpiar historial
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="relative mb-3">
+                            <input 
+                              type="text"
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              placeholder="Buscar pregunta..."
+                              className="w-full bg-zinc-950/60 border border-zinc-900 rounded-lg py-2 pl-8 pr-3 text-white text-xs focus:outline-none focus:border-neon-blue transition"
+                            />
+                            <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-2.5" />
+                          </div>
+
+                          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                            {(() => {
+                              const filtered = buzzerQuestions.filter(q => 
+                                q.question_text.toLowerCase().includes(searchQuery.toLowerCase())
+                              );
+
+                              if (filtered.length === 0) {
+                                return (
+                                  <div className="text-center py-8 text-zinc-600">
+                                    <HelpCircle className="w-8 h-8 mx-auto mb-1.5 opacity-20" />
+                                    <p className="text-[11px]">No se encontraron preguntas.</p>
+                                  </div>
+                                );
+                              }
+
+                              return filtered.map((q) => {
+                                const realIdx = buzzerQuestions.findIndex(bq => bq.id === q.id);
+                                const isSelected = selectedBuzzerQuestionId === q.id;
+                                const isAsked = askedBuzzerQuestionIds.includes(q.id);
+
+                                return (
+                                  <div 
+                                    key={q.id} 
+                                    className={`p-2.5 bg-zinc-950/40 border rounded-xl flex items-center justify-between gap-3 transition ${
+                                      isSelected 
+                                        ? 'border-neon-pink bg-neon-pink/5' 
+                                        : 'border-zinc-900 hover:border-zinc-850'
+                                    }`}
+                                  >
+                                    {/* Controles de Reordenamiento */}
+                                    <div className="flex flex-col gap-0.5 items-center shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => moveBuzzerQuestion(realIdx, 'up')}
+                                        disabled={realIdx === 0}
+                                        className="text-zinc-600 hover:text-neon-blue disabled:opacity-30 disabled:hover:text-zinc-600 transition p-0.5 cursor-pointer"
+                                        title="Mover arriba"
+                                      >
+                                        <ArrowUp className="w-3 h-3" />
+                                      </button>
+                                      <span className="text-[9px] text-zinc-500 font-mono font-bold">#{realIdx + 1}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => moveBuzzerQuestion(realIdx, 'down')}
+                                        disabled={realIdx === buzzerQuestions.length - 1}
+                                        className="text-zinc-600 hover:text-neon-blue disabled:opacity-30 disabled:hover:text-zinc-600 transition p-0.5 cursor-pointer"
+                                        title="Mover abajo"
+                                      >
+                                        <ArrowDown className="w-3 h-3" />
+                                      </button>
+                                    </div>
+
+                                    {/* Detalle de Pregunta */}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-bold text-zinc-200 leading-tight line-clamp-2" title={q.question_text}>
+                                        {q.question_text}
+                                      </p>
+                                      <span className="text-[9px] text-neon-green font-bold block mt-0.5">
+                                        Rta: {q.options[q.correct_option_index]}
+                                      </span>
+                                    </div>
+
+                                    {/* Botón Seleccionar / Indicador */}
+                                    <div className="flex flex-col items-end gap-1 shrink-0">
+                                      {isAsked && (
+                                        <span className="text-[7.5px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded-full border border-zinc-700 font-bold uppercase tracking-wider mb-1">
+                                          Usada
+                                        </span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSelectBuzzerQuestion(q)}
+                                        className={`text-[9px] font-black py-1 px-2 rounded-lg transition cursor-pointer ${
+                                          isSelected 
+                                            ? 'bg-neon-pink text-white border border-neon-pink'
+                                            : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:text-white'
+                                        }`}
+                                      >
+                                        {isSelected ? 'Cargada' : 'Cargar'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              });
+                            })()}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ) : (
                     /* RESULTADOS DEL PULSADOR EN TIEMPO REAL */
                     <div className="flex-1 flex flex-col my-4">
-                      {room.buzzer_question && (
-                        <div className="bg-zinc-950/50 border border-zinc-900 p-4 rounded-2xl mb-6 text-center">
-                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Pregunta en pantalla</span>
-                          <p className="text-lg font-bold text-white leading-snug">"{room.buzzer_question}"</p>
-                        </div>
-                      )}
+                      {(() => {
+                        const matchingQuestion = buzzerQuestions.find(
+                          q => q.question_text.trim().toLowerCase() === room.buzzer_question?.trim().toLowerCase()
+                        );
+                        
+                        return (
+                          <div className="bg-zinc-950/50 border border-zinc-900 p-4 rounded-2xl mb-6 flex flex-col md:flex-row gap-4 items-center justify-between text-left">
+                            <div className="text-left flex-1 min-w-0">
+                              <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Pregunta en pantalla</span>
+                              <p className="text-base font-bold text-white leading-snug">"{room.buzzer_question}"</p>
+                            </div>
+                            
+                            {matchingQuestion && (
+                              <div className="w-full md:w-64 shrink-0 bg-zinc-900/60 p-3 rounded-xl border border-zinc-800 space-y-1">
+                                <span className="text-[9px] text-neon-green font-bold uppercase tracking-wider block mb-1">Opciones y Respuesta Correcta</span>
+                                {matchingQuestion.options.map((opt, oIdx) => (
+                                  <div 
+                                    key={oIdx} 
+                                    className={`text-[10px] px-2 py-1 rounded flex items-center gap-1.5 ${
+                                      oIdx === matchingQuestion.correct_option_index 
+                                        ? 'bg-neon-green/10 text-neon-green font-bold' 
+                                        : 'text-zinc-500'
+                                    }`}
+                                  >
+                                    <span className="w-3.5 h-3.5 rounded bg-zinc-950 border border-zinc-800 flex items-center justify-center text-[8px] font-bold">
+                                      {String.fromCharCode(65 + oIdx)}
+                                    </span>
+                                    <span className="truncate">{opt}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Quien fue el primero en presionar */}
                       {players.filter(p => p.buzzed_at).length > 0 ? (
