@@ -847,14 +847,24 @@ export default function AdminPage() {
     if (!room || !playerRef.current) return;
     try {
       const isCurrentlyPlaying = room.music_video_playing;
-      let currentTime = 0;
-      if (typeof playerRef.current.getCurrentTime === 'function') {
-        currentTime = Math.floor(playerRef.current.getCurrentTime());
-      }
+      let currentTime = room.music_video_time || 0;
 
       if (isCurrentlyPlaying) {
+        if (typeof playerRef.current.getCurrentTime === 'function') {
+          currentTime = Math.floor(playerRef.current.getCurrentTime());
+        }
         playerRef.current.pauseVideo();
       } else {
+        let ytTime = 0;
+        if (typeof playerRef.current.getCurrentTime === 'function') {
+          ytTime = Math.floor(playerRef.current.getCurrentTime());
+        }
+        // Si ytTime es mayor que 0, lo usamos. Si no, usamos el tiempo guardado en la sala.
+        currentTime = ytTime > 0 ? ytTime : (room.music_video_time || 0);
+        
+        if (typeof playerRef.current.seekTo === 'function') {
+          playerRef.current.seekTo(currentTime, true);
+        }
         playerRef.current.playVideo();
       }
 
