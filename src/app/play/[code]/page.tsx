@@ -512,6 +512,13 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
   const toggleBingoMark = async (index: number) => {
     if (!playerId || !bingoCard || bingoCalled || bingoWinner) return;
 
+    const song = bingoCard[index];
+    const hasPlayed = bingoSongsPlayed.some(s => s.title === song.title);
+    const isAlreadyMarked = bingoMarked.includes(index);
+
+    // Solo permitir marcar si la canción ya ha salido (sonado)
+    if (!isAlreadyMarked && !hasPlayed) return;
+
     let updatedMarks = [...bingoMarked];
     if (updatedMarks.includes(index)) {
       updatedMarks = updatedMarks.filter(idx => idx !== index);
@@ -1126,7 +1133,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                     const hasPlayed = bingoSongsPlayed.some(s => s.title === song.title);
                     
                     // Colores de la celda
-                    let cellClass = 'border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-750';
+                    let cellClass = '';
                     let statusText = null;
 
                     if (isMarked) {
@@ -1137,17 +1144,25 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                         cellClass = 'border-amber-500 bg-amber-500/10 text-white font-extrabold';
                         statusText = 'Marcada';
                       }
+                    } else {
+                      if (hasPlayed) {
+                        cellClass = 'border-amber-500/50 bg-amber-500/5 text-amber-200 hover:border-amber-500 hover:bg-amber-500/10 font-bold';
+                        statusText = '¡Marcar!';
+                      } else {
+                        cellClass = 'border-zinc-900 bg-zinc-950/20 text-zinc-650 opacity-30 cursor-not-allowed';
+                        statusText = 'No sonó';
+                      }
                     }
 
                     return (
                       <button
                         key={idx}
                         onClick={() => toggleBingoMark(idx)}
-                        disabled={bingoCalled || bingoWinner}
+                        disabled={bingoCalled || bingoWinner || (!isMarked && !hasPlayed)}
                         className={`p-1.5 rounded-xl border text-center flex flex-col justify-between min-h-[82px] active:scale-95 transition-all duration-100 cursor-pointer disabled:cursor-not-allowed select-none ${cellClass}`}
                         style={{ touchAction: 'manipulation' }}
                       >
-                        <span className="text-[7.5px] font-mono text-zinc-650 block mb-0.5">
+                        <span className="text-[7.5px] font-mono text-zinc-500 block mb-0.5">
                           #{idx + 1}
                         </span>
                         <p className="text-[10px] font-bold leading-tight line-clamp-3 mb-1 break-words">
@@ -1156,7 +1171,13 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                         <div className="mt-auto shrink-0 flex items-center justify-center">
                           {statusText ? (
                             <span className={`text-[7.5px] px-1 py-0.2 rounded font-black uppercase tracking-wider ${
-                              hasPlayed ? 'bg-neon-green text-zinc-950' : 'bg-amber-500 text-zinc-950'
+                              isMarked && hasPlayed
+                                ? 'bg-neon-green text-zinc-950'
+                                : isMarked
+                                ? 'bg-amber-500 text-zinc-950'
+                                : hasPlayed
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                : 'bg-zinc-900/60 text-zinc-550'
                             }`}>
                               {statusText}
                             </span>
