@@ -16,6 +16,12 @@ interface Question {
   correct_option_index: number;
 }
 
+interface BuzzerQuestion {
+  id: string;
+  question_text: string;
+  answer_text?: string;
+}
+
 interface Player {
   id: string;
   nickname: string;
@@ -39,33 +45,32 @@ export default function AdminPage() {
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Estados para crear/editar una pregunta
+  // Pestaña activa de administración de preguntas (cuando no hay sala)
+  const [activeQuestionTab, setActiveQuestionTab] = useState<'trivia' | 'buzzer'>('trivia');
+
+  // Estados para crear/editar una pregunta de trivia
   const [newQuestionText, setNewQuestionText] = useState('');
   const [newOptions, setNewOptions] = useState(['', '', '', '']);
   const [newCorrectIndex, setNewCorrectIndex] = useState(0);
   const [addingQuestion, setAddingQuestion] = useState(false);
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
 
+  // Estados para crear/editar una pregunta del pulsador
+  const [newBuzzerQuestionText, setNewBuzzerQuestionText] = useState('');
+  const [newBuzzerAnswerText, setNewBuzzerAnswerText] = useState('');
+  const [addingBuzzerQuestion, setAddingBuzzerQuestion] = useState(false);
+  const [editingBuzzerQuestionId, setEditingBuzzerQuestionId] = useState<string | null>(null);
+
   // Estados para el Modo Pulsador
   const [buzzerQuestionInput, setBuzzerQuestionInput] = useState('');
   const [pointsToAwardInput, setPointsToAwardInput] = useState('100');
   const [selectedBuzzerQuestionId, setSelectedBuzzerQuestionId] = useState<string | null>(null);
   const [askedBuzzerQuestionIds, setAskedBuzzerQuestionIds] = useState<string[]>([]);
-  const [buzzerQuestions, setBuzzerQuestions] = useState<Question[]>([]);
+  const [buzzerQuestions, setBuzzerQuestions] = useState<BuzzerQuestion[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Sincronizar buzzerQuestions con las preguntas de la base de datos
-  useEffect(() => {
-    setBuzzerQuestions(prev => {
-      if (prev.length === 0) return questions;
-      const filtered = prev.filter(pq => questions.some(q => q.id === pq.id));
-      const newQuestions = questions.filter(q => !prev.some(pq => pq.id === q.id));
-      return [...filtered, ...newQuestions];
-    });
-  }, [questions]);
-
   // Seleccionar una pregunta de la lista para el pulsador
-  const handleSelectBuzzerQuestion = (q: Question) => {
+  const handleSelectBuzzerQuestion = (q: BuzzerQuestion) => {
     setSelectedBuzzerQuestionId(q.id);
     setBuzzerQuestionInput(q.question_text);
   };
@@ -85,6 +90,7 @@ export default function AdminPage() {
   // Cargar preguntas al montar el componente
   useEffect(() => {
     fetchQuestions();
+    fetchBuzzerQuestions();
   }, []);
 
   // Suscribirse a cambios en tiempo real una vez creada la sala
@@ -189,6 +195,140 @@ export default function AdminPage() {
       console.error(error);
     }
   };
+
+  const fetchBuzzerQuestions = async () => {
+    const { data, error } = await supabase
+      .from('buzzer_questions')
+      .select('*')
+      .order('created_at', { ascending: true });
+    
+    if (data) {
+      setBuzzerQuestions(data);
+    } else {
+      console.error(error);
+    }
+  };
+
+  const generateSeedBuzzerQuestions = async () => {
+    setLoading(true);
+    try {
+      const { count } = await supabase.from('buzzer_questions').select('*', { count: 'exact', head: true });
+      
+      if (count === 0) {
+        const defaultQuestions = [
+          { question_text: '¿Cuál es la capital de Francia?', answer_text: 'París' },
+          { question_text: '¿Qué país tiene forma de bota?', answer_text: 'Italia' },
+          { question_text: '¿Cuántos continentes existen en la Tierra?', answer_text: '6 (o 7 según el modelo)' },
+          { question_text: '¿Qué animal es conocido como el rey de la selva?', answer_text: 'El león' },
+          { question_text: '¿Cuál es el color que resulta de mezclar azul y amarillo?', answer_text: 'Verde' }
+        ];
+
+        const { error } = await supabase.from('buzzer_questions').insert(defaultQuestions);
+        if (error) {
+          alert('Error cargando preguntas semilla del pulsador: ' + error.message);
+        } else {
+          await fetchBuzzerQuestions();
+          alert('¡Preguntas semilla del pulsador cargadas con éxito!');
+        }
+      } else {
+        alert('Ya existen preguntas del pulsador en la base de datos.');
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmitBuzzerQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBuzzerQuestionText.trim()) {
+      alert('Por favor completa el texto de la pregunta.');
+      return;
+    }
+
+    setAddingBuzzerQuestion(true);
+    try {
+      if (editingBuzzerQuestionId) {
+        // Modo Edición
+        const { data, error } = await supabase
+          .from('buzzer_questions')
+          .update({
+            question_text: newBuzzerQuestionText.trim(),
+            answer_text: newBuzzerAnswerText.trim() || null
+          })
+          .eq('id', editingBuzzerQuestionId)
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        setBuzzerQuestions(prev => prev.map(q => q.id === editingBuzzerQuestionId ? data : q));
+        cancelEditingBuzzer();
+        alert('¡Pregunta del pulsador actualizada exitosamente!');
+      } else {
+        // Modo Crear
+        const { data, error } = await supabase
+          .from('buzzer_questions')
+          .insert([{
+            question_text: newBuzzerQuestionText.trim(),
+            answer_text: newBuzzerAnswerText.trim() || null
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        setBuzzerQuestions(prev => [...prev, data]);
+        setNewBuzzerQuestionText('');
+        setNewBuzzerAnswerText('');
+        alert('¡Pregunta del pulsador guardada exitosamente!');
+      }
+    } catch (err: any) {
+      alert('Error al guardar la pregunta del pulsador: ' + err.message);
+    } finally {
+      setAddingBuzzerQuestion(false);
+    }
+  };
+
+  const startEditingBuzzerQuestion = (q: BuzzerQuestion) => {
+    setEditingBuzzerQuestionId(q.id);
+    setNewBuzzerQuestionText(q.question_text);
+    setNewBuzzerAnswerText(q.answer_text || '');
+    
+    const formElement = document.getElementById('question-form-container');
+    if (formElement) {
+      formElement.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const cancelEditingBuzzer = () => {
+    setEditingBuzzerQuestionId(null);
+    setNewBuzzerQuestionText('');
+    setNewBuzzerAnswerText('');
+  };
+
+  const handleDeleteBuzzerQuestion = async (id: string) => {
+    if (!confirm('¿Estás seguro de que deseas eliminar esta pregunta del pulsador?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('buzzer_questions')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setBuzzerQuestions(prev => prev.filter(q => q.id !== id));
+
+      if (editingBuzzerQuestionId === id) {
+        cancelEditingBuzzer();
+      }
+    } catch (err: any) {
+      alert('Error al eliminar la pregunta del pulsador: ' + err.message);
+    }
+  };
+
 
   const fetchPlayers = async () => {
     if (!room) return;
@@ -916,168 +1056,347 @@ export default function AdminPage() {
             </div>
 
             {/* PANEL DERECHO: GESTIÓN DE PREGUNTAS */}
-            <div className="lg:col-span-7 flex flex-col gap-6 w-full">
+            <div className="lg:col-span-7 flex flex-col gap-6 w-full font-sans">
               
-              {/* CREAR PREGUNTA */}
-              <div id="question-form-container" className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                  {editingQuestionId ? (
-                    <>
-                      <Edit2 className="w-5 h-5 text-neon-blue" />
-                      Editar Pregunta
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-5 h-5 text-neon-pink" />
-                      Agregar Nueva Pregunta
-                    </>
-                  )}
-                </h3>
-                
-                <form onSubmit={handleSubmitQuestion} className="space-y-4">
-                  <div>
-                    <label className="text-xs text-zinc-400 font-semibold block mb-1">Texto de la Pregunta</label>
-                    <input 
-                      type="text"
-                      value={newQuestionText}
-                      onChange={(e) => setNewQuestionText(e.target.value)}
-                      placeholder="Ej: ¿Cuál es el río más largo del mundo?"
-                      className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/20 transition"
-                      required
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {newOptions.map((opt, idx) => (
-                      <div key={idx} className="space-y-1">
-                        <div className="flex justify-between items-center">
-                          <label className="text-xs text-zinc-400 font-semibold">
-                            Opción {String.fromCharCode(65 + idx)}
-                          </label>
-                          <label className="text-[10px] text-zinc-400 hover:text-neon-green flex items-center gap-1 cursor-pointer transition select-none">
-                            <input 
-                              type="radio" 
-                              name="correctOption"
-                              checked={newCorrectIndex === idx}
-                              onChange={() => setNewCorrectIndex(idx)}
-                              className="accent-neon-green"
-                            />
-                            ¿Correcta?
-                          </label>
-                        </div>
+              {/* SELECTOR DE PESTAÑAS */}
+              <div className="flex gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => setActiveQuestionTab('trivia')}
+                  className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                    activeQuestionTab === 'trivia'
+                      ? 'bg-neon-blue/10 text-neon-blue border-neon-blue/30 shadow-sm shadow-neon-blue/5'
+                      : 'text-zinc-400 hover:text-white border-transparent'
+                  }`}
+                >
+                  <Trophy className="w-3.5 h-3.5" />
+                  Preguntas de Trivia
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveQuestionTab('buzzer')}
+                  className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                    activeQuestionTab === 'buzzer'
+                      ? 'bg-neon-pink/10 text-neon-pink border-neon-pink/30 shadow-sm shadow-neon-pink/5'
+                      : 'text-zinc-400 hover:text-white border-transparent'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  Preguntas de Pulsador
+                </button>
+              </div>
+
+              {activeQuestionTab === 'trivia' ? (
+                <>
+                  {/* CREAR PREGUNTA */}
+                  <div id="question-form-container" className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                      {editingQuestionId ? (
+                        <>
+                          <Edit2 className="w-5 h-5 text-neon-blue" />
+                          Editar Pregunta
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-5 h-5 text-neon-pink" />
+                          Agregar Nueva Pregunta
+                        </>
+                      )}
+                    </h3>
+                    
+                    <form onSubmit={handleSubmitQuestion} className="space-y-4">
+                      <div>
+                        <label className="text-xs text-zinc-400 font-semibold block mb-1">Texto de la Pregunta</label>
                         <input 
                           type="text"
-                          value={opt}
-                          onChange={(e) => {
-                            const updated = [...newOptions];
-                            updated[idx] = e.target.value;
-                            setNewOptions(updated);
-                          }}
-                          placeholder={`Opción ${String.fromCharCode(65 + idx)}`}
-                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2 px-3 text-white text-xs focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/10 transition"
+                          value={newQuestionText}
+                          onChange={(e) => setNewQuestionText(e.target.value)}
+                          placeholder="Ej: ¿Cuál es el río más largo del mundo?"
+                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/20 transition"
                           required
                         />
                       </div>
-                    ))}
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {newOptions.map((opt, idx) => (
+                          <div key={idx} className="space-y-1">
+                            <div className="flex justify-between items-center">
+                              <label className="text-xs text-zinc-400 font-semibold">
+                                Opción {String.fromCharCode(65 + idx)}
+                              </label>
+                              <label className="text-[10px] text-zinc-400 hover:text-neon-green flex items-center gap-1 cursor-pointer transition select-none">
+                                <input 
+                                  type="radio" 
+                                  name="correctOption"
+                                  checked={newCorrectIndex === idx}
+                                  onChange={() => setNewCorrectIndex(idx)}
+                                  className="accent-neon-green"
+                                />
+                                ¿Correcta?
+                              </label>
+                            </div>
+                            <input 
+                              type="text"
+                              value={opt}
+                              onChange={(e) => {
+                                const updated = [...newOptions];
+                                updated[idx] = e.target.value;
+                                setNewOptions(updated);
+                              }}
+                              placeholder={`Opción ${String.fromCharCode(65 + idx)}`}
+                              className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2 px-3 text-white text-xs focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/10 transition"
+                              required
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-end items-center gap-2 pt-2">
+                        {editingQuestionId && (
+                          <button
+                            type="button"
+                            onClick={cancelEditing}
+                            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs py-2.5 px-5 rounded-xl transition cursor-pointer active:scale-95"
+                          >
+                            Cancelar
+                          </button>
+                        )}
+                        <button
+                          type="submit"
+                          disabled={addingQuestion}
+                          className="bg-gradient-to-r from-neon-blue to-neon-purple hover:shadow-neon-blue/20 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition cursor-pointer active:scale-95 disabled:opacity-50"
+                        >
+                          {addingQuestion ? (
+                            'Guardando...'
+                          ) : editingQuestionId ? (
+                            'Actualizar Pregunta'
+                          ) : (
+                            'Guardar Pregunta'
+                          )}
+                        </button>
+                      </div>
+                    </form>
                   </div>
 
-                  <div className="flex justify-end items-center gap-2 pt-2">
-                    {editingQuestionId && (
-                      <button
-                        type="button"
-                        onClick={cancelEditing}
-                        className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs py-2.5 px-5 rounded-xl transition cursor-pointer active:scale-95"
-                      >
-                        Cancelar
-                      </button>
-                    )}
-                    <button
-                      type="submit"
-                      disabled={addingQuestion}
-                      className="bg-gradient-to-r from-neon-blue to-neon-purple hover:shadow-neon-blue/20 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition cursor-pointer active:scale-95 disabled:opacity-50"
-                    >
-                      {addingQuestion ? (
-                        'Guardando...'
-                      ) : editingQuestionId ? (
-                        'Actualizar Pregunta'
-                      ) : (
-                        'Guardar Pregunta'
+                  {/* LISTA DE PREGUNTAS */}
+                  <div className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20 max-h-[350px] overflow-hidden flex flex-col">
+                    <h3 className="text-lg font-bold text-white mb-3 flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <HelpCircle className="w-5 h-5 text-neon-blue" />
+                        Preguntas Existentes ({questions.length})
+                      </span>
+                      {questions.length > 0 && (
+                        <button 
+                          onClick={async () => {
+                            if (confirm('¿Estás seguro de que deseas eliminar TODAS las preguntas?')) {
+                              const { error } = await supabase.from('questions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                              if (error) {
+                                alert('Error al vaciar: ' + error.message);
+                              } else {
+                                fetchQuestions();
+                                alert('¡Preguntas eliminadas correctamente!');
+                              }
+                            }
+                          }}
+                          className="text-[10px] text-neon-red hover:underline cursor-pointer font-bold uppercase tracking-wider transition"
+                        >
+                          Eliminar Todas
+                        </button>
                       )}
-                    </button>
-                  </div>
-                </form>
-              </div>
+                    </h3>
 
-              {/* LISTA DE PREGUNTAS */}
-              <div className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20 max-h-[350px] overflow-hidden flex flex-col">
-                <h3 className="text-lg font-bold text-white mb-3 flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <HelpCircle className="w-5 h-5 text-neon-blue" />
-                    Preguntas Existentes ({questions.length})
-                  </span>
-                  {questions.length > 0 && (
-                    <button 
-                      onClick={async () => {
-                        if (confirm('¿Estás seguro de que deseas eliminar TODAS las preguntas?')) {
-                          const { error } = await supabase.from('questions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-                          if (error) {
-                            alert('Error al vaciar: ' + error.message);
-                          } else {
-                            fetchQuestions();
-                            alert('¡Preguntas eliminadas correctamente!');
-                          }
-                        }
-                      }}
-                      className="text-[10px] text-neon-red hover:underline cursor-pointer font-bold uppercase tracking-wider transition"
-                    >
-                      Eliminar Todas
-                    </button>
-                  )}
-                </h3>
-
-                <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
-                  {questions.map((q, idx) => (
-                    <div key={q.id} className={`p-3 bg-zinc-950/40 border rounded-xl flex justify-between items-start hover:border-zinc-800 transition ${editingQuestionId === q.id ? 'border-neon-blue/60 bg-neon-blue/5' : 'border-zinc-900'}`}>
-                      <div className="flex-1 min-w-0 pr-4">
-                        <p className="text-sm font-semibold text-white break-words">{idx + 1}. {q.question_text}</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 mt-1.5">
-                          {q.options.map((opt, oIdx) => (
-                            <span 
-                              key={oIdx} 
-                              className={`text-[10px] break-words ${oIdx === q.correct_option_index ? 'text-neon-green font-bold' : 'text-zinc-500'}`}
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                      {questions.map((q, idx) => (
+                        <div key={q.id} className={`p-3 bg-zinc-950/40 border rounded-xl flex justify-between items-start hover:border-zinc-800 transition ${editingQuestionId === q.id ? 'border-neon-blue/60 bg-neon-blue/5' : 'border-zinc-900'}`}>
+                          <div className="flex-1 min-w-0 pr-4">
+                            <p className="text-sm font-semibold text-white break-words">{idx + 1}. {q.question_text}</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 mt-1.5">
+                              {q.options.map((opt, oIdx) => (
+                                <span 
+                                  key={oIdx} 
+                                  className={`text-[10px] break-words ${oIdx === q.correct_option_index ? 'text-neon-green font-bold' : 'text-zinc-500'}`}
+                                >
+                                  {String.fromCharCode(65 + oIdx)}) {opt}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                            <button 
+                              onClick={() => startEditingQuestion(q)}
+                              className={`p-1 transition cursor-pointer rounded ${editingQuestionId === q.id ? 'text-neon-blue bg-neon-blue/10' : 'text-zinc-500 hover:text-neon-blue hover:bg-zinc-900'}`}
+                              title="Editar pregunta"
                             >
-                              {String.fromCharCode(65 + oIdx)}) {opt}
-                            </span>
-                          ))}
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteQuestion(q.id)}
+                              className="text-zinc-500 hover:text-neon-red p-1 transition cursor-pointer rounded hover:bg-zinc-900"
+                              title="Eliminar pregunta"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
-                        <button 
-                          onClick={() => startEditingQuestion(q)}
-                          className={`p-1 transition cursor-pointer rounded ${editingQuestionId === q.id ? 'text-neon-blue bg-neon-blue/10' : 'text-zinc-500 hover:text-neon-blue hover:bg-zinc-900'}`}
-                          title="Editar pregunta"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteQuestion(q.id)}
-                          className="text-zinc-500 hover:text-neon-red p-1 transition cursor-pointer rounded hover:bg-zinc-900"
-                          title="Eliminar pregunta"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                      ))}
 
-                  {questions.length === 0 && (
-                    <div className="text-center py-8 text-zinc-600">
-                      <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                      <p className="text-xs">No hay preguntas cargadas en la base de datos.</p>
+                      {questions.length === 0 && (
+                        <div className="text-center py-8 text-zinc-600">
+                          <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                          <p className="text-xs">No hay preguntas cargadas en la base de datos.</p>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* CREAR PREGUNTA PULSADOR */}
+                  <div id="question-form-container" className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                      {editingBuzzerQuestionId ? (
+                        <>
+                          <Edit2 className="w-5 h-5 text-neon-pink" />
+                          Editar Pregunta de Pulsador
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-5 h-5 text-neon-pink" />
+                          Agregar Pregunta de Pulsador
+                        </>
+                      )}
+                    </h3>
+                    
+                    <form onSubmit={handleSubmitBuzzerQuestion} className="space-y-4">
+                      <div>
+                        <label className="text-xs text-zinc-400 font-semibold block mb-1">Texto de la Pregunta</label>
+                        <input 
+                          type="text"
+                          value={newBuzzerQuestionText}
+                          onChange={(e) => setNewBuzzerQuestionText(e.target.value)}
+                          placeholder="Ej: ¿Cuál es la capital de Italia?"
+                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="text-xs text-zinc-400 font-semibold block mb-1">Respuesta Correcta (Opcional - Como guía para el administrador)</label>
+                        <input 
+                          type="text"
+                          value={newBuzzerAnswerText}
+                          onChange={(e) => setNewBuzzerAnswerText(e.target.value)}
+                          placeholder="Ej: Roma"
+                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-pink focus:ring-1 focus:ring-neon-pink/20 transition"
+                        />
+                      </div>
+
+                      <div className="flex justify-end items-center gap-2 pt-2">
+                        {editingBuzzerQuestionId && (
+                          <button
+                            type="button"
+                            onClick={cancelEditingBuzzer}
+                            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs py-2.5 px-5 rounded-xl transition cursor-pointer active:scale-95"
+                          >
+                            Cancelar
+                          </button>
+                        )}
+                        <button
+                          type="submit"
+                          disabled={addingBuzzerQuestion}
+                          className="bg-gradient-to-r from-neon-pink to-neon-purple hover:shadow-neon-pink/20 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition cursor-pointer active:scale-95 disabled:opacity-50"
+                        >
+                          {addingBuzzerQuestion ? (
+                            'Guardando...'
+                          ) : editingBuzzerQuestionId ? (
+                            'Actualizar Pregunta'
+                          ) : (
+                            'Guardar Pregunta'
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* LISTA PREGUNTAS PULSADOR */}
+                  <div className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20 max-h-[350px] overflow-hidden flex flex-col">
+                    <h3 className="text-lg font-bold text-white mb-3 flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <HelpCircle className="w-5 h-5 text-neon-pink" />
+                        Preguntas de Pulsador Existentes ({buzzerQuestions.length})
+                      </span>
+                      <div className="flex items-center gap-3">
+                        {buzzerQuestions.length === 0 && (
+                          <button
+                            type="button"
+                            onClick={generateSeedBuzzerQuestions}
+                            disabled={loading}
+                            className="text-[10px] text-neon-pink hover:underline cursor-pointer font-bold uppercase tracking-wider transition"
+                          >
+                            Cargar Semilla
+                          </button>
+                        )}
+                        {buzzerQuestions.length > 0 && (
+                          <button 
+                            onClick={async () => {
+                              if (confirm('¿Estás seguro de que deseas eliminar TODAS las preguntas del pulsador?')) {
+                                const { error } = await supabase.from('buzzer_questions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                                if (error) {
+                                  alert('Error al vaciar: ' + error.message);
+                                } else {
+                                  fetchBuzzerQuestions();
+                                  alert('¡Preguntas del pulsador eliminadas correctamente!');
+                                }
+                              }
+                            }}
+                            className="text-[10px] text-neon-red hover:underline cursor-pointer font-bold uppercase tracking-wider transition"
+                          >
+                            Eliminar Todas
+                          </button>
+                        )}
+                      </div>
+                    </h3>
+
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                      {buzzerQuestions.map((q, idx) => (
+                        <div key={q.id} className={`p-3 bg-zinc-950/40 border rounded-xl flex justify-between items-start hover:border-zinc-800 transition ${editingBuzzerQuestionId === q.id ? 'border-neon-pink/60 bg-neon-pink/5' : 'border-zinc-900'}`}>
+                          <div className="flex-1 min-w-0 pr-4">
+                            <p className="text-sm font-semibold text-white break-words">{idx + 1}. {q.question_text}</p>
+                            {q.answer_text && (
+                              <p className="text-xs text-neon-green font-semibold mt-1">
+                                Respuesta: {q.answer_text}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                            <button 
+                              onClick={() => startEditingBuzzerQuestion(q)}
+                              className={`p-1 transition cursor-pointer rounded ${editingBuzzerQuestionId === q.id ? 'text-neon-pink bg-neon-pink/10' : 'text-zinc-500 hover:text-neon-pink hover:bg-zinc-900'}`}
+                              title="Editar pregunta"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteBuzzerQuestion(q.id)}
+                              className="text-zinc-500 hover:text-neon-red p-1 transition cursor-pointer rounded hover:bg-zinc-900"
+                              title="Eliminar pregunta"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                      {buzzerQuestions.length === 0 && (
+                        <div className="text-center py-8 text-zinc-600">
+                          <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                          <p className="text-xs">No hay preguntas de pulsador cargadas en la base de datos.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
             </div>
 
@@ -1454,23 +1773,14 @@ export default function AdminPage() {
                                   <p className="text-xs font-bold text-white pr-6 leading-snug">
                                     {selectedQuestion.question_text}
                                   </p>
-                                  <div className="space-y-1.5 pt-1.5 border-t border-zinc-900/60">
-                                    {selectedQuestion.options.map((opt, oIdx) => (
-                                      <div 
-                                        key={oIdx} 
-                                        className={`text-[10px] p-1.5 rounded flex items-center gap-2 ${
-                                          oIdx === selectedQuestion.correct_option_index 
-                                            ? 'bg-neon-green/10 border border-neon-green/20 text-neon-green font-bold' 
-                                            : 'bg-zinc-900/40 text-zinc-400 border border-transparent'
-                                        }`}
-                                      >
-                                        <span className="w-4 h-4 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[8px] font-bold">
-                                          {String.fromCharCode(65 + oIdx)}
-                                        </span>
-                                        <span className="truncate">{opt}</span>
+                                  {selectedQuestion.answer_text && (
+                                    <div className="pt-2 border-t border-zinc-900/60">
+                                      <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Respuesta Correcta</span>
+                                      <div className="text-[11px] p-2 rounded bg-neon-green/10 border border-neon-green/20 text-neon-green font-bold">
+                                        {selectedQuestion.answer_text}
                                       </div>
-                                    ))}
-                                  </div>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })()
@@ -1578,9 +1888,11 @@ export default function AdminPage() {
                                       <p className="text-xs font-bold text-zinc-200 leading-tight line-clamp-2" title={q.question_text}>
                                         {q.question_text}
                                       </p>
-                                      <span className="text-[9px] text-neon-green font-bold block mt-0.5">
-                                        Rta: {q.options[q.correct_option_index]}
-                                      </span>
+                                      {q.answer_text && (
+                                        <span className="text-[9px] text-neon-green font-bold block mt-0.5">
+                                          Rta: {q.answer_text}
+                                        </span>
+                                      )}
                                     </div>
 
                                     {/* Botón Seleccionar / Indicador */}
@@ -1625,24 +1937,12 @@ export default function AdminPage() {
                               <p className="text-base font-bold text-white leading-snug">"{room.buzzer_question}"</p>
                             </div>
                             
-                            {matchingQuestion && (
-                              <div className="w-full md:w-64 shrink-0 bg-zinc-900/60 p-3 rounded-xl border border-zinc-800 space-y-1">
-                                <span className="text-[9px] text-neon-green font-bold uppercase tracking-wider block mb-1">Opciones y Respuesta Correcta</span>
-                                {matchingQuestion.options.map((opt, oIdx) => (
-                                  <div 
-                                    key={oIdx} 
-                                    className={`text-[10px] px-2 py-1 rounded flex items-center gap-1.5 ${
-                                      oIdx === matchingQuestion.correct_option_index 
-                                        ? 'bg-neon-green/10 text-neon-green font-bold' 
-                                        : 'text-zinc-500'
-                                    }`}
-                                  >
-                                    <span className="w-3.5 h-3.5 rounded bg-zinc-950 border border-zinc-800 flex items-center justify-center text-[8px] font-bold">
-                                      {String.fromCharCode(65 + oIdx)}
-                                    </span>
-                                    <span className="truncate">{opt}</span>
-                                  </div>
-                                ))}
+                            {matchingQuestion && matchingQuestion.answer_text && (
+                              <div className="w-full md:w-64 shrink-0 bg-zinc-900/60 p-3 rounded-xl border border-zinc-800 space-y-1 text-left">
+                                <span className="text-[9px] text-neon-green font-bold uppercase tracking-wider block mb-1">Respuesta Correcta</span>
+                                <div className="text-xs p-2.5 rounded-lg bg-neon-green/10 border border-neon-green/20 text-neon-green font-bold">
+                                  {matchingQuestion.answer_text}
+                                </div>
                               </div>
                             )}
                           </div>
