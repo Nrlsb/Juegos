@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   Users, Play, Award, RotateCcw, Volume2, Plus, 
   HelpCircle, CheckCircle, BarChart3, Trophy, ArrowRight, Trash2, ShieldAlert,
-  Zap, Radio, ArrowUp, ArrowDown, Search, X, Edit2
+  Zap, Radio, ArrowUp, ArrowDown, Search, X, Edit2, Music, Pause
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -14,6 +14,9 @@ interface Question {
   question_text: string;
   options: string[];
   correct_option_index: number;
+  category?: string;
+  video_start_seconds?: number;
+  song_title?: string;
 }
 
 interface BuzzerQuestion {
@@ -46,7 +49,7 @@ export default function AdminPage() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Pestaña activa de administración de preguntas (cuando no hay sala)
-  const [activeQuestionTab, setActiveQuestionTab] = useState<'trivia' | 'buzzer'>('trivia');
+  const [activeQuestionTab, setActiveQuestionTab] = useState<'trivia' | 'buzzer' | 'music'>('trivia');
 
   // Estados para crear/editar una pregunta de trivia
   const [newQuestionText, setNewQuestionText] = useState('');
@@ -68,6 +71,13 @@ export default function AdminPage() {
   const [askedBuzzerQuestionIds, setAskedBuzzerQuestionIds] = useState<string[]>([]);
   const [buzzerQuestions, setBuzzerQuestions] = useState<BuzzerQuestion[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Estados para el Modo Música (Adivina la Canción)
+  const [newMusicSongTitle, setNewMusicSongTitle] = useState('');
+  const [newMusicStartSeconds, setNewMusicStartSeconds] = useState(0);
+  const playerRef = useRef<any>(null);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [musicSearchQuery, setMusicSearchQuery] = useState('');
 
   // Seleccionar una pregunta de la lista para el pulsador
   const handleSelectBuzzerQuestion = (q: BuzzerQuestion) => {
@@ -92,6 +102,60 @@ export default function AdminPage() {
     fetchQuestions();
     fetchBuzzerQuestions();
   }, []);
+
+  // Inicializar YouTube Iframe API para el Administrador
+  useEffect(() => {
+    if (!(window as any).YT) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+    }
+
+    (window as any).onYouTubeIframeAPIReady = () => {
+      initPlayer();
+    };
+
+    if ((window as any).YT && (window as any).YT.Player) {
+      initPlayer();
+    }
+
+    function initPlayer() {
+      if (document.getElementById('admin-youtube-player') && !playerRef.current) {
+        playerRef.current = new (window as any).YT.Player('admin-youtube-player', {
+          videoId: 'vLD_R65SvAQ',
+          playerVars: {
+            autoplay: 0,
+            controls: 1,
+            modestbranding: 1,
+            rel: 0
+          },
+          events: {
+            onReady: () => {
+              setPlayerReady(true);
+            }
+          }
+        });
+      }
+    }
+
+    const interval = setInterval(() => {
+      if (document.getElementById('admin-youtube-player') && !playerRef.current && (window as any).YT && (window as any).YT.Player) {
+        initPlayer();
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+      if (playerRef.current) {
+        try {
+          playerRef.current.destroy();
+        } catch (e) {}
+        playerRef.current = null;
+        setPlayerReady(false);
+      }
+    };
+  }, [room?.status]);
 
   // Suscribirse a cambios en tiempo real una vez creada la sala
   useEffect(() => {
@@ -399,13 +463,25 @@ export default function AdminPage() {
     try {
       if (editingQuestionId) {
         // Modo Edición
+        const updates: any = {
+          question_text: newQuestionText.trim(),
+          options: newOptions.map(o => o.trim()),
+          correct_option_index: newCorrectIndex
+        };
+
+        if (activeQuestionTab === 'music') {
+          updates.category = 'music';
+          updates.song_title = newMusicSongTitle.trim() || null;
+          updates.video_start_seconds = Number(newMusicStartSeconds) || 0;
+        } else {
+          updates.category = 'trivia';
+          updates.song_title = null;
+          updates.video_start_seconds = 0;
+        }
+
         const { data, error } = await supabase
           .from('questions')
-          .update({
-            question_text: newQuestionText.trim(),
-            options: newOptions.map(o => o.trim()),
-            correct_option_index: newCorrectIndex
-          })
+          .update(updates)
           .eq('id', editingQuestionId)
           .select()
           .single();
@@ -419,17 +495,29 @@ export default function AdminPage() {
         setNewQuestionText('');
         setNewOptions(['', '', '', '']);
         setNewCorrectIndex(0);
+        setNewMusicSongTitle('');
+        setNewMusicStartSeconds(0);
         setEditingQuestionId(null);
         alert('¡Pregunta actualizada exitosamente!');
       } else {
         // Modo Crear
+        const insertObj: any = {
+          question_text: newQuestionText.trim(),
+          options: newOptions.map(o => o.trim()),
+          correct_option_index: newCorrectIndex
+        };
+
+        if (activeQuestionTab === 'music') {
+          insertObj.category = 'music';
+          insertObj.song_title = newMusicSongTitle.trim() || null;
+          insertObj.video_start_seconds = Number(newMusicStartSeconds) || 0;
+        } else {
+          insertObj.category = 'trivia';
+        }
+
         const { data, error } = await supabase
           .from('questions')
-          .insert([{
-            question_text: newQuestionText.trim(),
-            options: newOptions.map(o => o.trim()),
-            correct_option_index: newCorrectIndex
-          }])
+          .insert([insertObj])
           .select()
           .single();
 
@@ -442,6 +530,8 @@ export default function AdminPage() {
         setNewQuestionText('');
         setNewOptions(['', '', '', '']);
         setNewCorrectIndex(0);
+        setNewMusicSongTitle('');
+        setNewMusicStartSeconds(0);
         alert('¡Pregunta guardada exitosamente!');
       }
     } catch (err: any) {
@@ -457,6 +547,13 @@ export default function AdminPage() {
     setNewQuestionText(q.question_text);
     setNewOptions([...q.options]);
     setNewCorrectIndex(q.correct_option_index);
+    if (q.category === 'music') {
+      setNewMusicSongTitle(q.song_title || '');
+      setNewMusicStartSeconds(q.video_start_seconds || 0);
+      setActiveQuestionTab('music');
+    } else {
+      setActiveQuestionTab('trivia');
+    }
     
     // Hacer scroll suave hacia el formulario en móviles
     const formElement = document.getElementById('question-form-container');
@@ -471,6 +568,8 @@ export default function AdminPage() {
     setNewQuestionText('');
     setNewOptions(['', '', '', '']);
     setNewCorrectIndex(0);
+    setNewMusicSongTitle('');
+    setNewMusicStartSeconds(0);
   };
 
   // Eliminar una pregunta de Supabase
@@ -680,6 +779,128 @@ export default function AdminPage() {
     setLoading(false);
   };
 
+  // Sincronizar tiempo de video de música periódicamente si está reproduciéndose
+  useEffect(() => {
+    if (!room || room.status !== 'MUSIC' || !room.music_video_playing || !playerRef.current) return;
+
+    const syncInterval = setInterval(async () => {
+      if (typeof playerRef.current.getCurrentTime === 'function') {
+        const currentTime = Math.floor(playerRef.current.getCurrentTime());
+        if (Math.abs(currentTime - room.music_video_time) > 2) {
+          await supabase
+            .from('rooms')
+            .update({ music_video_time: currentTime })
+            .eq('id', room.id);
+        }
+      }
+    }, 3000);
+
+    return () => clearInterval(syncInterval);
+  }, [room?.music_video_playing, room?.status]);
+
+  // Lanzar pregunta de tipo música
+  const launchMusicQuestion = async (q: Question) => {
+    setLoading(true);
+    try {
+      const { error: rError } = await supabase
+        .from('responses')
+        .delete()
+        .eq('room_id', room.id);
+      if (rError) throw rError;
+
+      const index = questions.findIndex(item => item.id === q.id);
+      if (index !== -1) {
+        setCurrentQuestionIndex(index);
+      }
+
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          current_question_id: q.id,
+          question_started_at: new Date().toISOString(),
+          music_video_playing: false,
+          music_video_time: q.video_start_seconds || 0
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+      setResponses([]);
+
+      if (playerRef.current && typeof playerRef.current.cueVideoById === 'function') {
+        playerRef.current.cueVideoById({
+          videoId: 'vLD_R65SvAQ',
+          startSeconds: q.video_start_seconds || 0
+        });
+      }
+    } catch (err: any) {
+      alert('Error al lanzar canción: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Alternar reproducción de video
+  const toggleMusicPlayback = async () => {
+    if (!room || !playerRef.current) return;
+    try {
+      const isCurrentlyPlaying = room.music_video_playing;
+      let currentTime = 0;
+      if (typeof playerRef.current.getCurrentTime === 'function') {
+        currentTime = Math.floor(playerRef.current.getCurrentTime());
+      }
+
+      if (isCurrentlyPlaying) {
+        playerRef.current.pauseVideo();
+      } else {
+        playerRef.current.playVideo();
+      }
+
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          music_video_playing: !isCurrentlyPlaying,
+          music_video_time: currentTime
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRoom(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Volver al listado de canciones de música
+  const backToMusicList = async () => {
+    if (!room) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          current_question_id: null,
+          question_started_at: null,
+          music_video_playing: false,
+          music_video_time: 0
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+      if (error) throw error;
+      setRoom(data);
+      setResponses([]);
+    } catch (err: any) {
+      alert('Error al volver al listado: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Cerrar/Reiniciar la sala
   const deleteRoom = async () => {
     if (!room) return;
@@ -693,7 +914,7 @@ export default function AdminPage() {
     setLoading(false);
   };
 
-  // Cambiar el estado de la sala (e.g., ir a Modo Pulsador)
+  // Cambiar el estado de la sala (e.g., ir a Modo Pulsador o Adivina la Canción)
   const changeRoomStatus = async (newStatus: string) => {
     if (!room) return;
     setLoading(true);
@@ -702,15 +923,26 @@ export default function AdminPage() {
         status: newStatus 
       };
       
-      // Si cambia a LOBBY, resetea estados de trivia y de buzzer
+      // Si cambia a LOBBY, resetea estados de trivia y de buzzer/música
       if (newStatus === 'LOBBY') {
         updates.current_question_id = null;
         updates.question_started_at = null;
         updates.buzzer_active = false;
         updates.buzzer_question = null;
+        updates.music_video_playing = false;
+        updates.music_video_time = 0;
       } else if (newStatus === 'BUZZER') {
         updates.buzzer_active = false;
         updates.buzzer_question = '';
+        updates.music_video_playing = false;
+        updates.music_video_time = 0;
+      } else if (newStatus === 'MUSIC') {
+        updates.current_question_id = null;
+        updates.question_started_at = null;
+        updates.buzzer_active = false;
+        updates.buzzer_question = null;
+        updates.music_video_playing = false;
+        updates.music_video_time = 0;
       }
 
       const { data, error } = await supabase
@@ -724,7 +956,7 @@ export default function AdminPage() {
       setRoom(data);
       
       // Limpiar pulsaciones de jugadores al cambiar de modo
-      if (newStatus === 'BUZZER' || newStatus === 'LOBBY') {
+      if (newStatus === 'BUZZER' || newStatus === 'LOBBY' || newStatus === 'MUSIC') {
         await supabase
           .from('players')
           .update({ buzzed_at: null })
@@ -985,7 +1217,7 @@ export default function AdminPage() {
           
           {room && (
             <div className="flex items-center gap-2">
-              {room.status === 'BUZZER' ? (
+              {(room.status === 'BUZZER' || room.status === 'MUSIC') ? (
                 <button
                   onClick={() => changeRoomStatus('LOBBY')}
                   disabled={loading}
@@ -994,13 +1226,23 @@ export default function AdminPage() {
                   <Trophy className="w-3.5 h-3.5" /> Volver a Trivia
                 </button>
               ) : (
-                <button
-                  onClick={() => changeRoomStatus('BUZZER')}
-                  disabled={loading}
-                  className="bg-neon-pink/15 hover:bg-neon-pink/25 text-neon-pink border border-neon-pink/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Zap className="w-3.5 h-3.5 animate-pulse" /> Modo Pulsador
-                </button>
+                <>
+                  <button
+                    onClick={() => changeRoomStatus('MUSIC')}
+                    disabled={loading}
+                    className="bg-neon-green/15 hover:bg-neon-green/25 text-neon-green border border-neon-green/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Music className="w-3.5 h-3.5 animate-pulse" /> Adivina la Canción
+                  </button>
+
+                  <button
+                    onClick={() => changeRoomStatus('BUZZER')}
+                    disabled={loading}
+                    className="bg-neon-pink/15 hover:bg-neon-pink/25 text-neon-pink border border-neon-pink/30 text-xs font-semibold py-2 px-3.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Zap className="w-3.5 h-3.5 animate-pulse" /> Modo Pulsador
+                  </button>
+                </>
               )}
               
               <button
@@ -1062,7 +1304,10 @@ export default function AdminPage() {
               <div className="flex gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl">
                 <button
                   type="button"
-                  onClick={() => setActiveQuestionTab('trivia')}
+                  onClick={() => {
+                    setActiveQuestionTab('trivia');
+                    cancelEditing();
+                  }}
                   className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
                     activeQuestionTab === 'trivia'
                       ? 'bg-neon-blue/10 text-neon-blue border-neon-blue/30 shadow-sm shadow-neon-blue/5'
@@ -1074,7 +1319,25 @@ export default function AdminPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveQuestionTab('buzzer')}
+                  onClick={() => {
+                    setActiveQuestionTab('music');
+                    cancelEditing();
+                  }}
+                  className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                    activeQuestionTab === 'music'
+                      ? 'bg-neon-green/10 text-neon-green border-neon-green/30 shadow-sm shadow-neon-green/5'
+                      : 'text-zinc-400 hover:text-white border-transparent'
+                  }`}
+                >
+                  <Music className="w-3.5 h-3.5" />
+                  Adivina la Canción
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveQuestionTab('buzzer');
+                    cancelEditing();
+                  }}
                   className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
                     activeQuestionTab === 'buzzer'
                       ? 'bg-neon-pink/10 text-neon-pink border-neon-pink/30 shadow-sm shadow-neon-pink/5'
@@ -1086,7 +1349,7 @@ export default function AdminPage() {
                 </button>
               </div>
 
-              {activeQuestionTab === 'trivia' ? (
+              {activeQuestionTab === 'trivia' || activeQuestionTab === 'music' ? (
                 <>
                   {/* CREAR PREGUNTA */}
                   <div id="question-form-container" className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20">
@@ -1094,12 +1357,12 @@ export default function AdminPage() {
                       {editingQuestionId ? (
                         <>
                           <Edit2 className="w-5 h-5 text-neon-blue" />
-                          Editar Pregunta
+                          {activeQuestionTab === 'music' ? 'Editar Canción de Disney' : 'Editar Pregunta'}
                         </>
                       ) : (
                         <>
                           <Plus className="w-5 h-5 text-neon-pink" />
-                          Agregar Nueva Pregunta
+                          {activeQuestionTab === 'music' ? 'Agregar Canción de Disney' : 'Agregar Nueva Pregunta'}
                         </>
                       )}
                     </h3>
@@ -1111,11 +1374,39 @@ export default function AdminPage() {
                           type="text"
                           value={newQuestionText}
                           onChange={(e) => setNewQuestionText(e.target.value)}
-                          placeholder="Ej: ¿Cuál es el río más largo del mundo?"
+                          placeholder={activeQuestionTab === 'music' ? 'Ej: ¿Qué película de Disney tiene esta canción?' : 'Ej: ¿Cuál es el río más largo del mundo?'}
                           className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/20 transition"
                           required
                         />
                       </div>
+                      
+                      {activeQuestionTab === 'music' && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-xs text-zinc-400 font-semibold block mb-1">Título de la Canción</label>
+                            <input 
+                              type="text"
+                              value={newMusicSongTitle}
+                              onChange={(e) => setNewMusicSongTitle(e.target.value)}
+                              placeholder="Ej: Un mundo ideal / Nadie como tú"
+                              className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-green focus:ring-1 focus:ring-neon-green/20 transition"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-zinc-400 font-semibold block mb-1">Segundo de inicio (YouTube)</label>
+                            <input 
+                              type="number"
+                              value={newMusicStartSeconds}
+                              onChange={(e) => setNewMusicStartSeconds(Number(e.target.value))}
+                              placeholder="Ej: 128"
+                              className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-neon-green focus:ring-1 focus:ring-neon-green/20 transition"
+                              min={0}
+                              required
+                            />
+                          </div>
+                        </div>
+                      )}
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {newOptions.map((opt, idx) => (
@@ -1143,7 +1434,7 @@ export default function AdminPage() {
                                 updated[idx] = e.target.value;
                                 setNewOptions(updated);
                               }}
-                              placeholder={`Opción ${String.fromCharCode(65 + idx)}`}
+                              placeholder={activeQuestionTab === 'music' ? `Película distractora ${String.fromCharCode(65 + idx)}` : `Opción ${String.fromCharCode(65 + idx)}`}
                               className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2 px-3 text-white text-xs focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/10 transition"
                               required
                             />
@@ -1180,73 +1471,95 @@ export default function AdminPage() {
 
                   {/* LISTA DE PREGUNTAS */}
                   <div className="glass-panel p-6 rounded-3xl border border-zinc-800/80 bg-zinc-950/20 max-h-[350px] overflow-hidden flex flex-col">
-                    <h3 className="text-lg font-bold text-white mb-3 flex items-center justify-between">
-                      <span className="flex items-center gap-2">
-                        <HelpCircle className="w-5 h-5 text-neon-blue" />
-                        Preguntas Existentes ({questions.length})
-                      </span>
-                      {questions.length > 0 && (
-                        <button 
-                          onClick={async () => {
-                            if (confirm('¿Estás seguro de que deseas eliminar TODAS las preguntas?')) {
-                              const { error } = await supabase.from('questions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-                              if (error) {
-                                alert('Error al vaciar: ' + error.message);
-                              } else {
-                                fetchQuestions();
-                                alert('¡Preguntas eliminadas correctamente!');
-                              }
-                            }
-                          }}
-                          className="text-[10px] text-neon-red hover:underline cursor-pointer font-bold uppercase tracking-wider transition"
-                        >
-                          Eliminar Todas
-                        </button>
-                      )}
-                    </h3>
+                    {(() => {
+                      const filteredQuestions = questions.filter(q => 
+                        activeQuestionTab === 'music' ? q.category === 'music' : q.category !== 'music'
+                      );
 
-                    <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
-                      {questions.map((q, idx) => (
-                        <div key={q.id} className={`p-3 bg-zinc-950/40 border rounded-xl flex justify-between items-start hover:border-zinc-800 transition ${editingQuestionId === q.id ? 'border-neon-blue/60 bg-neon-blue/5' : 'border-zinc-900'}`}>
-                          <div className="flex-1 min-w-0 pr-4">
-                            <p className="text-sm font-semibold text-white break-words">{idx + 1}. {q.question_text}</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 mt-1.5">
-                              {q.options.map((opt, oIdx) => (
-                                <span 
-                                  key={oIdx} 
-                                  className={`text-[10px] break-words ${oIdx === q.correct_option_index ? 'text-neon-green font-bold' : 'text-zinc-500'}`}
-                                >
-                                  {String.fromCharCode(65 + oIdx)}) {opt}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
-                            <button 
-                              onClick={() => startEditingQuestion(q)}
-                              className={`p-1 transition cursor-pointer rounded ${editingQuestionId === q.id ? 'text-neon-blue bg-neon-blue/10' : 'text-zinc-500 hover:text-neon-blue hover:bg-zinc-900'}`}
-                              title="Editar pregunta"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteQuestion(q.id)}
-                              className="text-zinc-500 hover:text-neon-red p-1 transition cursor-pointer rounded hover:bg-zinc-900"
-                              title="Eliminar pregunta"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                      return (
+                        <>
+                          <h3 className="text-lg font-bold text-white mb-3 flex items-center justify-between">
+                            <span className="flex items-center gap-2">
+                              {activeQuestionTab === 'music' ? (
+                                <Music className="w-5 h-5 text-neon-green" />
+                              ) : (
+                                <HelpCircle className="w-5 h-5 text-neon-blue" />
+                              )}
+                              {activeQuestionTab === 'music' ? `Canciones Existentes (${filteredQuestions.length})` : `Preguntas Existentes (${filteredQuestions.length})`}
+                            </span>
+                            {filteredQuestions.length > 0 && (
+                              <button 
+                                onClick={async () => {
+                                  if (confirm(`¿Estás seguro de que deseas eliminar TODAS las preguntas de ${activeQuestionTab === 'music' ? 'música' : 'trivia'}?`)) {
+                                    const { error } = await supabase
+                                      .from('questions')
+                                      .delete()
+                                      .eq('category', activeQuestionTab === 'music' ? 'music' : 'trivia');
+                                    if (error) {
+                                      alert('Error al vaciar: ' + error.message);
+                                    } else {
+                                      fetchQuestions();
+                                      alert('¡Preguntas eliminadas correctamente!');
+                                    }
+                                  }
+                                }}
+                                className="text-[10px] text-neon-red hover:underline cursor-pointer font-bold uppercase tracking-wider transition"
+                              >
+                                Eliminar Todas
+                              </button>
+                            )}
+                          </h3>
 
-                      {questions.length === 0 && (
-                        <div className="text-center py-8 text-zinc-600">
-                          <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                          <p className="text-xs">No hay preguntas cargadas en la base de datos.</p>
-                        </div>
-                      )}
-                    </div>
+                          <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                            {filteredQuestions.map((q, idx) => (
+                              <div key={q.id} className={`p-3 bg-zinc-950/40 border rounded-xl flex justify-between items-start hover:border-zinc-800 transition ${editingQuestionId === q.id ? 'border-neon-blue/60 bg-neon-blue/5' : 'border-zinc-900'}`}>
+                                <div className="flex-1 min-w-0 pr-4">
+                                  <p className="text-sm font-semibold text-white break-words">{idx + 1}. {q.question_text}</p>
+                                  {q.song_title && (
+                                    <p className="text-xs text-neon-green font-bold mt-1 flex items-center gap-1.5">
+                                      <Music className="w-3.5 h-3.5" /> Canción: {q.song_title} ({q.video_start_seconds}s)
+                                    </p>
+                                  )}
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 mt-2">
+                                    {q.options.map((opt, oIdx) => (
+                                      <span 
+                                        key={oIdx} 
+                                        className={`text-[10px] break-words ${oIdx === q.correct_option_index ? 'text-neon-green font-bold' : 'text-zinc-500'}`}
+                                      >
+                                        {String.fromCharCode(65 + oIdx)}) {opt}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                                  <button 
+                                    onClick={() => startEditingQuestion(q)}
+                                    className={`p-1 transition cursor-pointer rounded ${editingQuestionId === q.id ? 'text-neon-blue bg-neon-blue/10' : 'text-zinc-500 hover:text-neon-blue hover:bg-zinc-900'}`}
+                                    title="Editar"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDeleteQuestion(q.id)}
+                                    className="text-zinc-500 hover:text-neon-red p-1 transition cursor-pointer rounded hover:bg-zinc-900"
+                                    title="Eliminar"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+
+                            {filteredQuestions.length === 0 && (
+                              <div className="text-center py-8 text-zinc-600">
+                                <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                                <p className="text-xs">No hay preguntas cargadas en esta categoría.</p>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </>
               ) : (
@@ -1619,23 +1932,34 @@ export default function AdminPage() {
                   </div>
 
                   <div className="mt-auto pt-6 border-t border-zinc-800/80 flex justify-end">
-                    <button
-                      onClick={nextQuestion}
-                      disabled={loading}
-                      className="px-8 py-4 bg-gradient-to-r from-neon-green to-neon-blue text-zinc-950 font-black rounded-xl hover:shadow-neon-green/20 transition cursor-pointer flex items-center gap-2"
-                    >
-                      {currentQuestionIndex + 1 >= questions.length ? (
-                        <>
-                          Finalizar Trivia
-                          <Trophy className="w-5 h-5" />
-                        </>
-                      ) : (
-                        <>
-                          Siguiente Pregunta
-                          <ArrowRight className="w-5 h-5" />
-                        </>
-                      )}
-                    </button>
+                    {activeQuestion && activeQuestion.category === 'music' ? (
+                      <button
+                        onClick={backToMusicList}
+                        disabled={loading}
+                        className="px-8 py-4 bg-gradient-to-r from-neon-green to-neon-blue text-zinc-950 font-black rounded-xl hover:shadow-neon-green/20 transition cursor-pointer flex items-center gap-2"
+                      >
+                        Elegir Siguiente Canción
+                        <Music className="w-5 h-5" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={nextQuestion}
+                        disabled={loading}
+                        className="px-8 py-4 bg-gradient-to-r from-neon-green to-neon-blue text-zinc-950 font-black rounded-xl hover:shadow-neon-green/20 transition cursor-pointer flex items-center gap-2"
+                      >
+                        {currentQuestionIndex + 1 >= questions.length ? (
+                          <>
+                            Finalizar Trivia
+                            <Trophy className="w-5 h-5" />
+                          </>
+                        ) : (
+                          <>
+                            Siguiente Pregunta
+                            <ArrowRight className="w-5 h-5" />
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -2073,6 +2397,211 @@ export default function AdminPage() {
                           </button>
                         </div>
                       </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* MODO MÚSICA (ADIVINA LA CANCIÓN) */}
+              {room.status === 'MUSIC' && (
+                <div className="glass-panel p-6 rounded-3xl border-zinc-800 flex-1 flex flex-col min-h-[480px]">
+                  <div className="flex items-center justify-between pb-4 border-b border-zinc-800 mb-6">
+                    <div>
+                      <h2 className="text-xl font-black text-white flex items-center gap-2">
+                        <Music className="w-5 h-5 text-neon-green animate-pulse" />
+                        Adivina la Canción (Disney)
+                      </h2>
+                      <p className="text-xs text-zinc-400">Selecciona y reproduce las canciones de Disney para los usuarios</p>
+                    </div>
+                  </div>
+
+                  {!room.current_question_id ? (
+                    /* LISTADO DE CANCIONES DE MÚSICA DISPONIBLES PARA LANZAR */
+                    <div className="flex-1 flex flex-col">
+                      <div className="mb-4 relative">
+                        <input
+                          type="text"
+                          value={musicSearchQuery}
+                          onChange={(e) => setMusicSearchQuery(e.target.value)}
+                          placeholder="Buscar película o canción de Disney..."
+                          className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-white text-sm focus:outline-none focus:border-neon-green focus:ring-1 focus:ring-neon-green/20 transition"
+                        />
+                        <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3.5" />
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto max-h-[360px] space-y-2 pr-1 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent font-sans">
+                        {(() => {
+                          const musicQuestions = questions.filter(q => q.category === 'music');
+                          const filtered = musicQuestions.filter(q => 
+                            q.question_text.toLowerCase().includes(musicSearchQuery.toLowerCase()) ||
+                            (q.song_title && q.song_title.toLowerCase().includes(musicSearchQuery.toLowerCase())) ||
+                            q.options.some(opt => opt.toLowerCase().includes(musicSearchQuery.toLowerCase()))
+                          );
+
+                          return (
+                            <>
+                              {filtered.map((q) => (
+                                <div key={q.id} className="p-3 bg-zinc-950/30 border border-zinc-900 rounded-xl flex items-center justify-between hover:border-zinc-850 hover:bg-zinc-900/10 transition">
+                                  <div className="flex-1 min-w-0 pr-4">
+                                    <h4 className="text-sm font-bold text-white flex items-center gap-1.5 truncate">
+                                      <Music className="w-3.5 h-3.5 text-neon-green font-normal" />
+                                      {q.song_title || 'Canción sin título'}
+                                    </h4>
+                                    <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                                      Película correcta: <strong className="text-neon-green">{q.options[q.correct_option_index]}</strong>
+                                    </p>
+                                    <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                                      Segundo de inicio: {q.video_start_seconds}s
+                                    </p>
+                                  </div>
+                                  
+                                  <button
+                                    onClick={() => launchMusicQuestion(q)}
+                                    disabled={loading}
+                                    className="bg-neon-green/10 hover:bg-neon-green/20 text-neon-green border border-neon-green/30 hover:border-neon-green font-bold text-xs py-2 px-4 rounded-xl transition cursor-pointer flex items-center gap-1 shrink-0"
+                                  >
+                                    Lanzar canción
+                                  </button>
+                                </div>
+                              ))}
+
+                              {filtered.length === 0 && (
+                                <div className="text-center py-12 text-zinc-600">
+                                  <Music className="w-10 h-10 mx-auto mb-2 opacity-25" />
+                                  <p className="text-xs font-semibold">No se encontraron canciones que coincidan.</p>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  ) : (
+                    /* REPRODUCTOR Y CONTROL DE LA CANCIÓN SELECCIONADA */
+                    <div className="flex-1 flex flex-col gap-4 font-sans">
+                      {(() => {
+                        const activeQ = questions.find(q => q.id === room.current_question_id);
+                        if (!activeQ) return null;
+
+                        return (
+                          <>
+                            {/* Información de la canción activa */}
+                            <div className="bg-zinc-950/40 p-4 rounded-2xl border border-zinc-900 flex justify-between items-start">
+                              <div className="min-w-0">
+                                <span className="text-[9px] text-neon-green font-black uppercase tracking-wider block mb-1">Canción Activa</span>
+                                <h3 className="text-base font-bold text-white leading-snug truncate">"{activeQ.song_title}"</h3>
+                                <p className="text-xs text-zinc-400 mt-0.5">
+                                  Película correcta: <span className="text-neon-green font-semibold">{activeQ.options[activeQ.correct_option_index]}</span>
+                                </p>
+                              </div>
+
+                              <button
+                                onClick={backToMusicList}
+                                disabled={loading}
+                                className="bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 text-[10px] font-bold py-1.5 px-3 rounded-lg transition cursor-pointer"
+                              >
+                                Cambiar Canción
+                              </button>
+                            </div>
+
+                            {/* Contenedor del reproductor de YouTube */}
+                            <div className="w-full aspect-video rounded-2xl overflow-hidden border border-zinc-800 bg-black relative flex items-center justify-center">
+                              {/* Div requerido por la API de IFrame de YT */}
+                              <div id="admin-youtube-player" className="w-full h-full"></div>
+                              
+                              {!playerReady && (
+                                <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center gap-2">
+                                  <span className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-neon-green border-t-transparent"></span>
+                                  <span className="text-xs text-zinc-400 font-medium">Cargando reproductor...</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Controles de reproducción */}
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-2">
+                              {/* Botones de reproducción */}
+                              <div className="flex items-center gap-2.5">
+                                <button
+                                  onClick={toggleMusicPlayback}
+                                  disabled={!playerReady}
+                                  className={`w-14 h-14 rounded-full flex items-center justify-center transition cursor-pointer ${
+                                    room.music_video_playing
+                                      ? 'bg-neon-red/10 text-neon-red border border-neon-red/30 hover:bg-neon-red/20'
+                                      : 'bg-neon-green/10 text-neon-green border border-neon-green/30 hover:bg-neon-green/20'
+                                  }`}
+                                >
+                                  {room.music_video_playing ? (
+                                    <Pause className="w-6 h-6 fill-current" />
+                                  ) : (
+                                    <Play className="w-6 h-6 fill-current ml-1" />
+                                  )}
+                                </button>
+
+                                <div>
+                                  <p className="text-sm font-bold text-white">
+                                    {room.music_video_playing ? 'Reproduciendo audio...' : 'Audio en pausa'}
+                                  </p>
+                                  <p className="text-xs text-zinc-400">
+                                    El audio se reproduce sincronizado en los teléfonos de los usuarios.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Botón para detener y pasar a puntajes / leaderboard */}
+                              <div className="flex gap-2 w-full sm:w-auto">
+                                <button
+                                  onClick={async () => {
+                                    // Detener el reproductor localmente primero
+                                    if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
+                                      playerRef.current.pauseVideo();
+                                    }
+                                    await showLeaderboard();
+                                  }}
+                                  disabled={loading}
+                                  className="w-full sm:w-auto bg-gradient-to-r from-neon-green to-neon-blue text-zinc-950 font-black py-3 px-6 rounded-xl hover:shadow-neon-green/20 transition cursor-pointer flex items-center justify-center gap-1.5"
+                                >
+                                  Finalizar Ronda y Puntos
+                                  <ArrowRight className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Respuestas recibidas en tiempo real */}
+                            <div className="mt-4 pt-4 border-t border-zinc-900">
+                              <div className="flex items-center justify-between mb-2.5">
+                                <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                                  Respuestas recibidas:
+                                </h4>
+                                <span className="text-xs font-bold text-white">
+                                  {responses.length} / {players.length}
+                                </span>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-2">
+                                {activeQ.options.map((opt, oIdx) => {
+                                  const count = responses.filter(r => r.selected_option === oIdx).length;
+                                  const isCorrect = oIdx === activeQ.correct_option_index;
+
+                                  return (
+                                    <div key={oIdx} className={`p-2.5 rounded-xl border flex justify-between items-center bg-zinc-950/20 ${
+                                      isCorrect ? 'border-neon-green/30 bg-neon-green/5' : 'border-zinc-900'
+                                    }`}>
+                                      <span className={`text-xs truncate ${isCorrect ? 'text-neon-green font-bold' : 'text-zinc-400'}`}>
+                                        {String.fromCharCode(65 + oIdx)}) {opt}
+                                      </span>
+                                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                        count > 0 ? 'bg-zinc-800 text-white' : 'bg-transparent text-zinc-600'
+                                      }`}>
+                                        {count}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

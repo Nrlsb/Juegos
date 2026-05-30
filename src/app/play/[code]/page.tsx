@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { 
   Gamepad2, Clock, CheckCircle2, XCircle, Trophy, 
-  Sparkles, HelpCircle, LogOut, AlertTriangle, Radio, Zap
+  Sparkles, HelpCircle, LogOut, AlertTriangle, Radio, Zap, Music
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -55,6 +55,12 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
   const [roomBuzzerQuestion, setRoomBuzzerQuestion] = useState('');
   const [pressingBuzzer, setPressingBuzzer] = useState(false);
 
+  // Estados para el Modo Música
+  const [musicVideoPlaying, setMusicVideoPlaying] = useState(false);
+  const [musicVideoTime, setMusicVideoTime] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const playerRef = useRef<any>(null);
+
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
@@ -101,9 +107,11 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
           setQuestionStartedAt(updatedRoom.question_started_at);
           setRoomBuzzerActive(updatedRoom.buzzer_active || false);
           setRoomBuzzerQuestion(updatedRoom.buzzer_question || '');
+          setMusicVideoPlaying(updatedRoom.music_video_playing || false);
+          setMusicVideoTime(updatedRoom.music_video_time || 0);
 
-          if (updatedRoom.status === 'QUESTION' && updatedRoom.current_question_id) {
-            // Se lanzó una nueva pregunta: resetear estados locales y cargarla
+          if ((updatedRoom.status === 'QUESTION' || updatedRoom.status === 'MUSIC') && updatedRoom.current_question_id) {
+            // Se lanzó una nueva pregunta/canción: resetear estados locales y cargarla
             setSelectedOption(null);
             setHasAnswered(false);
             setQuestionResult(null);
@@ -179,6 +187,86 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
     };
   }, [roomStatus, questionStartedAt, currentQuestionId]);
 
+  // Controlar la reproducción de YouTube del cliente basándose en el estado de la sala
+  useEffect(() => {
+    if (!playerRef.current || !audioEnabled) return;
+    try {
+      if (musicVideoPlaying) {
+        playerRef.current.seekTo(musicVideoTime, true);
+        playerRef.current.playVideo();
+      } else {
+        playerRef.current.pauseVideo();
+        playerRef.current.seekTo(musicVideoTime, true);
+      }
+    } catch (e) {
+      console.error('Error al controlar reproductor de audio:', e);
+    }
+  }, [musicVideoPlaying, musicVideoTime, audioEnabled]);
+
+  // Habilitar audio y montar reproductor en el cliente
+  const enableAudio = () => {
+    if ((window as any).YT && (window as any).YT.Player && !playerRef.current) {
+      initClientPlayer();
+    } else {
+      if (!(window as any).YT) {
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+      }
+      (window as any).onYouTubeIframeAPIReady = () => {
+        initClientPlayer();
+      };
+      setTimeout(() => {
+        if ((window as any).YT && (window as any).YT.Player && !playerRef.current) {
+          initClientPlayer();
+        }
+      }, 1000);
+    }
+
+    function initClientPlayer() {
+      try {
+        playerRef.current = new (window as any).YT.Player('client-youtube-player', {
+          videoId: 'vLD_R65SvAQ',
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            modestbranding: 1,
+            rel: 0,
+            volume: 100
+          },
+          events: {
+            onReady: () => {
+              setAudioEnabled(true);
+              if (musicVideoPlaying) {
+                playerRef.current.seekTo(musicVideoTime, true);
+                playerRef.current.playVideo();
+              } else {
+                playerRef.current.seekTo(musicVideoTime, true);
+                playerRef.current.pauseVideo();
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.error('Error al crear reproductor de cliente:', err);
+      }
+    }
+  };
+
+  // Limpiar el reproductor al desmontar el componente
+  useEffect(() => {
+    return () => {
+      if (playerRef.current) {
+        try {
+          playerRef.current.destroy();
+        } catch (e) {}
+        playerRef.current = null;
+        setAudioEnabled(false);
+      }
+    };
+  }, []);
+
   // Inicializar estados iniciales
   const initGameSession = async (rId: string, pId: string) => {
     try {
@@ -188,15 +276,17 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
         .select('*')
         .eq('id', rId)
         .single();
-
+ 
       if (roomData) {
         setRoomStatus(roomData.status);
         setCurrentQuestionId(roomData.current_question_id);
         setQuestionStartedAt(roomData.question_started_at);
         setRoomBuzzerActive(roomData.buzzer_active || false);
         setRoomBuzzerQuestion(roomData.buzzer_question || '');
-
-        if (roomData.status === 'QUESTION' && roomData.current_question_id) {
+        setMusicVideoPlaying(roomData.music_video_playing || false);
+        setMusicVideoTime(roomData.music_video_time || 0);
+ 
+        if ((roomData.status === 'QUESTION' || roomData.status === 'MUSIC') && roomData.current_question_id) {
           await fetchQuestion(roomData.current_question_id);
           // Verificar si ya había respondido esta pregunta
           await checkAlreadyAnswered(rId, pId, roomData.current_question_id);
@@ -205,14 +295,14 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
           await fetchQuestionResult(roomData.current_question_id);
         }
       }
-
+ 
       // Obtener info del jugador
       const { data: playerData } = await supabase
         .from('players')
         .select('*')
         .eq('id', pId)
         .single();
-
+ 
       if (playerData) {
         setMyPlayerInfo(playerData);
       }
@@ -808,7 +898,126 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
             )}
           </div>
         )}
+        {/* ============================================================
+            7. PANTALLA: MODO MÚSICA (ADIVINA LA CANCION)
+            ============================================================ */}
+        {roomStatus === 'MUSIC' && (
+          <div className="w-full flex-1 flex flex-col justify-center items-center py-4">
+            
+            {/* Elemento oculto para el reproductor de YouTube para sincronizar audio */}
+            <div className="hidden">
+              <div id="client-youtube-player"></div>
+            </div>
 
+            {!audioEnabled && activeQuestion && (
+              <button
+                onClick={enableAudio}
+                className="w-full bg-neon-green/20 border border-neon-green/45 hover:bg-neon-green/30 text-neon-green text-xs font-black py-3 px-4 rounded-xl flex items-center justify-center gap-2 mb-6 transition active:scale-[0.98] cursor-pointer"
+              >
+                <Radio className="w-4 h-4 animate-pulse text-neon-green" />
+                Habilitar Audio Sincronizado
+              </button>
+            )}
+
+            {!activeQuestion ? (
+              /* ESPERA DE SELECCIÓN DE CANCIÓN */
+              <div className="w-full glass-panel p-8 rounded-3xl border-zinc-800 text-center my-auto animate-float">
+                <div className="w-16 h-16 bg-neon-green/10 border border-neon-green/20 rounded-full mx-auto mb-4 flex items-center justify-center">
+                  <Radio className="w-8 h-8 text-neon-green animate-pulse" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Adivina la Canción</h3>
+                <p className="text-zinc-400 text-sm mb-6">
+                  El administrador está eligiendo la siguiente canción de Disney...
+                </p>
+                <div className="inline-flex items-center gap-2 px-5 py-3 rounded-full bg-zinc-950/60 border border-zinc-900 text-xs text-zinc-500 font-semibold uppercase tracking-wider">
+                  <span className="w-2.5 h-2.5 rounded-full bg-neon-green animate-ping"></span>
+                  Esperando selección...
+                </div>
+              </div>
+            ) : (
+              /* TRIVIA DE CANCIONES ACTIVA */
+              <div className="w-full flex flex-col flex-1 justify-between">
+                <div className="text-center mb-6">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-neon-green block mb-2">
+                    Adivina la Película
+                  </span>
+                  
+                  {audioEnabled ? (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-neon-green/10 border border-neon-green/20 text-[10px] text-neon-green font-bold uppercase tracking-wider">
+                      <span className="w-2 h-2 rounded-full bg-neon-green animate-ping"></span>
+                      Audio en Vivo Habilitado
+                    </div>
+                  ) : (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-neon-red/10 border border-neon-red/20 text-[10px] text-neon-red font-bold uppercase tracking-wider">
+                      Audio Silenciado
+                    </div>
+                  )}
+
+                  <h2 className="text-lg font-bold text-zinc-300 mt-4 leading-snug">
+                    ¿A qué película de Disney pertenece esta canción?
+                  </h2>
+                </div>
+
+                {!hasAnswered ? (
+                  /* OPCIONES DE PELÍCULAS */
+                  <div className="grid grid-cols-1 gap-3.5 mb-6">
+                    {activeQuestion.options.map((opt: string, i: number) => {
+                      const colors = [
+                        'border-zinc-800 hover:border-neon-blue focus:border-neon-blue active:bg-neon-blue/10',
+                        'border-zinc-800 hover:border-neon-pink focus:border-neon-pink active:bg-neon-pink/10',
+                        'border-zinc-800 hover:border-neon-purple focus:border-neon-purple active:bg-neon-purple/10',
+                        'border-zinc-800 hover:border-neon-green focus:border-neon-green active:bg-neon-green/10'
+                      ];
+                      const bullets = [
+                        'bg-neon-blue/15 text-neon-blue border-neon-blue/30',
+                        'bg-neon-pink/15 text-neon-pink border-neon-pink/30',
+                        'bg-neon-purple/15 text-neon-purple border-neon-purple/30',
+                        'bg-neon-green/15 text-neon-green border-neon-green/30'
+                      ];
+
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => submitAnswer(i)}
+                          disabled={submittingAnswer}
+                          className={`w-full p-4 rounded-2xl border bg-zinc-950/40 text-left font-bold text-white transition duration-150 flex items-center gap-3 cursor-pointer ${colors[i % 4]}`}
+                        >
+                          <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm border font-extrabold ${bullets[i % 4]}`}>
+                            {String.fromCharCode(65 + i)}
+                          </span>
+                          <span>{opt}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* PANTALLA ESPERA DE RESPUESTA ENVIADA */
+                  <div className="w-full glass-panel p-8 rounded-3xl border-zinc-800 text-center my-auto">
+                    <div className="w-12 h-12 bg-neon-green/15 border border-neon-green/30 rounded-2xl mx-auto mb-4 flex items-center justify-center animate-pulse">
+                      <Music className="w-6 h-6 text-neon-green" />
+                    </div>
+                    {selectedOption !== null ? (
+                      <>
+                        <h3 className="text-lg font-bold text-white mb-2">¡Respuesta Registrada!</h3>
+                        <p className="text-zinc-400 text-sm mb-4">
+                          Has elegido la opción: <strong className="text-neon-green font-mono">{String.fromCharCode(65 + selectedOption)}</strong>
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <h3 className="text-lg font-bold text-white mb-2">Modo Música</h3>
+                        <p className="text-zinc-400 text-sm mb-4">Esperando resultados...</p>
+                      </>
+                    )}
+                    <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest animate-pulse">
+                      El administrador revelará la respuesta pronto...
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
