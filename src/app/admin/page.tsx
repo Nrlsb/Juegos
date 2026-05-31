@@ -151,12 +151,15 @@ export default function AdminPage() {
   // Sincronizar el índice de la pregunta actual con el ID de la pregunta en la sala restaurada
   useEffect(() => {
     if (room && questions.length > 0 && room.current_question_id) {
-      const idx = questions.findIndex(q => q.id === room.current_question_id);
+      const isMusicMode = room.status === 'MUSIC' || (room.status === 'LEADERBOARD' && questions.find(q => q.id === room.current_question_id)?.category === 'music');
+      const targetQuestions = isMusicMode ? questions : questions.filter(q => q.category !== 'music');
+      
+      const idx = targetQuestions.findIndex(q => q.id === room.current_question_id);
       if (idx !== -1) {
         setCurrentQuestionIndex(idx);
       }
     }
-  }, [room?.current_question_id, questions]);
+  }, [room?.current_question_id, room?.status, questions]);
 
   // Sincronizar estado del reproductor de YouTube con Supabase
   const handleAdminPlayerStateChange = async (state: number) => {
@@ -717,7 +720,8 @@ export default function AdminPage() {
 
   // Iniciar el juego
   const startGame = async () => {
-    if (questions.length === 0) {
+    const triviaQuestions = questions.filter(q => q.category !== 'music');
+    if (triviaQuestions.length === 0) {
       alert('Por favor carga o crea preguntas antes de empezar.');
       return;
     }
@@ -727,7 +731,7 @@ export default function AdminPage() {
     }
 
     setLoading(true);
-    const firstQuestion = questions[0];
+    const firstQuestion = triviaQuestions[0];
     
     const { data, error } = await supabase
       .from('rooms')
@@ -777,7 +781,12 @@ export default function AdminPage() {
 
     try {
       // 1. Obtener todas las respuestas correctas para la pregunta actual
-      const currentQuestion = questions[currentQuestionIndex];
+      const currentQuestion = activeQuestion;
+      if (!currentQuestion) {
+        alert('No se pudo encontrar la pregunta activa actual.');
+        setLoading(false);
+        return;
+      }
       const { data: qResponses, error: rError } = await supabase
         .from('responses')
         .select('*')
@@ -832,8 +841,9 @@ export default function AdminPage() {
     if (!room) return;
     setLoading(true);
 
+    const triviaQuestions = questions.filter(q => q.category !== 'music');
     const nextIndex = currentQuestionIndex + 1;
-    if (nextIndex >= questions.length) {
+    if (nextIndex >= triviaQuestions.length) {
       // Fin del juego
       const { data, error } = await supabase
         .from('rooms')
@@ -852,7 +862,7 @@ export default function AdminPage() {
       }
     } else {
       // Siguiente pregunta
-      const nextQ = questions[nextIndex];
+      const nextQ = triviaQuestions[nextIndex];
       const { data, error } = await supabase
         .from('rooms')
         .update({
@@ -1384,7 +1394,7 @@ export default function AdminPage() {
 
   // Obtener estadísticas de respuestas elegidas por los jugadores
   const getResponseStats = () => {
-    const currentQ = questions[currentQuestionIndex];
+    const currentQ = activeQuestion;
     if (!currentQ) return { stats: [0, 0, 0, 0], total: 0 };
 
     const stats: ResponseCount = { 0: 0, 1: 0, 2: 0, 3: 0 };
@@ -1673,7 +1683,7 @@ export default function AdminPage() {
     }
   };
 
-  const activeQuestion = questions[currentQuestionIndex];
+  const activeQuestion = questions.find(q => q.id === room?.current_question_id);
 
 
   return (
@@ -2303,7 +2313,7 @@ export default function AdminPage() {
                   {/* Temporizador */}
                   <div className="flex justify-between items-center mb-6">
                     <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-                      Pregunta {currentQuestionIndex + 1} de {questions.length}
+                      Pregunta {currentQuestionIndex + 1} de {questions.filter(q => q.category !== 'music').length}
                     </span>
                     <div className={`w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center font-bold text-xl glass-card ${timeLeft <= 5 ? 'animate-pulse-timer text-neon-red border-neon-red/30' : 'text-neon-blue border-neon-blue/30'}`}>
                       {timeLeft}
@@ -2492,7 +2502,7 @@ export default function AdminPage() {
                         disabled={loading}
                         className="px-8 py-4 bg-gradient-to-r from-neon-green to-neon-blue text-zinc-950 font-black rounded-xl hover:shadow-neon-green/20 transition cursor-pointer flex items-center gap-2"
                       >
-                        {currentQuestionIndex + 1 >= questions.length ? (
+                        {currentQuestionIndex + 1 >= questions.filter(q => q.category !== 'music').length ? (
                           <>
                             Finalizar Trivia
                             <Trophy className="w-5 h-5" />
