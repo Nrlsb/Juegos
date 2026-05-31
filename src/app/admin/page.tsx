@@ -254,6 +254,51 @@ export default function AdminPage() {
     };
   }, [room?.id]);
 
+  // Cuando el reproductor esté listo o cambie la última canción en Bingo, cargamos el video correspondiente en el reproductor.
+  useEffect(() => {
+    if (!playerReady || !playerRef.current || !room) return;
+    if (room.status === 'BINGO') {
+      const played = room.bingo_songs_played || [];
+      if (played.length > 0) {
+        const lastSong = played[played.length - 1];
+        if (lastSong.youtubeId) {
+          try {
+            // Verificar si el video cargado actualmente es diferente al de la última canción
+            let currentVideoId = '';
+            if (typeof playerRef.current.getVideoData === 'function') {
+              const videoData = playerRef.current.getVideoData();
+              currentVideoId = videoData?.video_id || '';
+            }
+            if (currentVideoId !== lastSong.youtubeId) {
+              ignoreStateChangeRef.current = true;
+              const startSecs = room.music_video_time || 0;
+              if (room.music_video_playing) {
+                if (typeof playerRef.current.loadVideoById === 'function') {
+                  playerRef.current.loadVideoById({
+                    videoId: lastSong.youtubeId,
+                    startSeconds: startSecs
+                  });
+                }
+              } else {
+                if (typeof playerRef.current.cueVideoById === 'function') {
+                  playerRef.current.cueVideoById({
+                    videoId: lastSong.youtubeId,
+                    startSeconds: startSecs
+                  });
+                }
+              }
+              setTimeout(() => {
+                ignoreStateChangeRef.current = false;
+              }, 1000);
+            }
+          } catch (e) {
+            console.error('Error al precargar video de Bingo:', e);
+          }
+        }
+      }
+    }
+  }, [playerReady, room?.id, room?.status, room?.bingo_songs_played?.length]);
+
   // Suscribirse a cambios en tiempo real una vez creada la sala
   useEffect(() => {
     if (!room) return;
@@ -889,7 +934,7 @@ export default function AdminPage() {
   // Usamos roomRef para evitar cierres de ámbito obsoletos (stale closures) y limitamos la actualización
   useEffect(() => {
     const currentRoom = roomRef.current;
-    if (!currentRoom || currentRoom.status !== 'MUSIC' || !currentRoom.music_video_playing || !playerRef.current) return;
+    if (!currentRoom || (currentRoom.status !== 'MUSIC' && currentRoom.status !== 'BINGO') || !currentRoom.music_video_playing || !playerRef.current) return;
 
     const syncInterval = setInterval(async () => {
       if (ignoreStateChangeRef.current) return;
@@ -1130,11 +1175,46 @@ export default function AdminPage() {
         updates.buzzer_question = null;
         
         let currentTime = room.music_video_time || 0;
-        if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
-          currentTime = Math.floor(playerRef.current.getCurrentTime());
+        if (playerRef.current) {
+          try {
+            let currentVideoId = '';
+            if (typeof playerRef.current.getVideoData === 'function') {
+              const videoData = playerRef.current.getVideoData();
+              currentVideoId = videoData?.video_id || '';
+            }
+            if (currentVideoId && currentVideoId !== 'vLD_R65SvAQ') {
+              ignoreStateChangeRef.current = true;
+              if (typeof playerRef.current.cueVideoById === 'function') {
+                playerRef.current.cueVideoById({
+                  videoId: 'vLD_R65SvAQ',
+                  startSeconds: 0
+                });
+              }
+              updates.music_video_playing = false;
+              updates.music_video_time = 0;
+              currentTime = 0;
+              setTimeout(() => {
+                ignoreStateChangeRef.current = false;
+              }, 1000);
+            } else {
+              if (typeof playerRef.current.getCurrentTime === 'function') {
+                currentTime = Math.floor(playerRef.current.getCurrentTime());
+              }
+              updates.music_video_playing = room.music_video_playing || false;
+              updates.music_video_time = currentTime;
+            }
+          } catch (e) {
+            console.error('Error al restaurar video de Disney:', e);
+            if (typeof playerRef.current.getCurrentTime === 'function') {
+              currentTime = Math.floor(playerRef.current.getCurrentTime());
+            }
+            updates.music_video_playing = room.music_video_playing || false;
+            updates.music_video_time = currentTime;
+          }
+        } else {
+          updates.music_video_playing = room.music_video_playing || false;
+          updates.music_video_time = currentTime;
         }
-        updates.music_video_playing = room.music_video_playing || false;
-        updates.music_video_time = currentTime;
       } else if (newStatus === 'BINGO') {
         updates.current_question_id = null;
         updates.question_started_at = null;
@@ -1411,6 +1491,56 @@ export default function AdminPage() {
     };
   };
 
+  // Cargar y reproducir el audio de una canción de Bingo
+  const playBingoSongAudio = (song: any) => {
+    if (!playerRef.current || !song.youtubeId) return;
+    try {
+      ignoreStateChangeRef.current = true;
+      if (typeof playerRef.current.loadVideoById === 'function') {
+        playerRef.current.loadVideoById({
+          videoId: song.youtubeId,
+          startSeconds: 0
+        });
+      }
+      setTimeout(() => {
+        ignoreStateChangeRef.current = false;
+      }, 1000);
+    } catch (e) {
+      console.error('Error al iniciar audio de bingo:', e);
+      ignoreStateChangeRef.current = false;
+    }
+  };
+
+  // Alternar reproducción de audio en Bingo
+  const handleToggleBingoPlay = async (lastSong: any) => {
+    if (!room || !playerRef.current || !lastSong || !lastSong.youtubeId) return;
+    
+    let currentVideoId = '';
+    try {
+      if (typeof playerRef.current.getVideoData === 'function') {
+        const videoData = playerRef.current.getVideoData();
+        currentVideoId = videoData?.video_id || '';
+      }
+    } catch (e) {}
+
+    if (currentVideoId !== lastSong.youtubeId) {
+      playBingoSongAudio(lastSong);
+      // Actualizar estado en Supabase
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({
+          music_video_playing: true,
+          music_video_time: 0
+        })
+        .eq('id', room.id)
+        .select()
+        .single();
+      if (data && !error) setRoom(data);
+    } else {
+      await toggleMusicPlayback();
+    }
+  };
+
   // Sacar canción de bingo
   const drawBingoSong = async () => {
     if (!room) return;
@@ -1438,7 +1568,9 @@ export default function AdminPage() {
       const { data, error } = await supabase
         .from('rooms')
         .update({
-          bingo_songs_played: updatedPlayed
+          bingo_songs_played: updatedPlayed,
+          music_video_playing: !!chosenSong.youtubeId,
+          music_video_time: 0
         })
         .eq('id', room.id)
         .select()
@@ -1447,19 +1579,23 @@ export default function AdminPage() {
       if (error) throw error;
       setRoom(data);
 
-      // Reproducir sonido al sacar canción
-      try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
-        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.25);
-      } catch (e) {}
+      if (chosenSong.youtubeId && playerRef.current) {
+        playBingoSongAudio(chosenSong);
+      } else {
+        // Sonido alternativo si no hay reproductor
+        try {
+          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+          gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.25);
+        } catch (e) {}
+      }
 
     } catch (err: any) {
       alert('Error al sacar canción de bingo: ' + err.message);
@@ -3501,6 +3637,52 @@ export default function AdminPage() {
                             <p className="text-sm text-zinc-400 font-medium">
                               {lastSong.artist}
                             </p>
+
+                            {/* Controles multimedia para Bingo */}
+                            {lastSong.youtubeId && (
+                              <div className="mt-4 flex items-center justify-center gap-3">
+                                {/* Retroceder 5 segundos */}
+                                <button
+                                  onClick={() => seekMusicBySeconds(-5)}
+                                  disabled={!playerReady}
+                                  className="w-8 h-8 rounded-full flex items-center justify-center bg-zinc-900 hover:bg-zinc-855 text-zinc-400 hover:text-white border border-zinc-800 transition cursor-pointer relative disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Retroceder 5 segundos"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span className="text-[7px] font-bold absolute bottom-0.5">-5</span>
+                                </button>
+
+                                {/* Play / Pause */}
+                                <button
+                                  onClick={() => handleToggleBingoPlay(lastSong)}
+                                  disabled={!playerReady}
+                                  className={`w-10 h-10 rounded-full flex items-center justify-center transition shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                                    room.music_video_playing
+                                      ? 'bg-amber-500 text-zinc-950 hover:bg-amber-400 hover:shadow-lg hover:shadow-amber-500/20'
+                                      : 'bg-neon-green text-zinc-950 hover:bg-emerald-400 hover:shadow-lg hover:shadow-neon-green/20'
+                                  }`}
+                                  title={room.music_video_playing ? 'Pausar canción' : 'Reproducir canción'}
+                                >
+                                  {room.music_video_playing ? (
+                                    <Pause className="w-4 h-4 fill-current" />
+                                  ) : (
+                                    <Play className="w-4 h-4 fill-current ml-0.5" />
+                                  )}
+                                </button>
+
+                                {/* Avanzar 5 segundos */}
+                                <button
+                                  onClick={() => seekMusicBySeconds(5)}
+                                  disabled={!playerReady}
+                                  className="w-8 h-8 rounded-full flex items-center justify-center bg-zinc-900 hover:bg-zinc-855 text-zinc-400 hover:text-white border border-zinc-800 transition cursor-pointer relative disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Avanzar 5 segundos"
+                                >
+                                  <RotateCw className="w-3.5 h-3.5" />
+                                  <span className="text-[7px] font-bold absolute bottom-0.5">+5</span>
+                                </button>
+                              </div>
+                            )}
+
                             <span className="mt-4 text-[10px] bg-zinc-900 text-zinc-500 font-mono px-2 py-0.5 rounded border border-zinc-800 font-bold">
                               Canción #{played.length} de {BINGO_SONGS.length}
                             </span>
@@ -3511,7 +3693,7 @@ export default function AdminPage() {
                       {/* Historial de canciones jugadas */}
                       <div className="flex flex-col h-[200px]">
                         <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block mb-2">Historial de Sorteo</span>
-                        <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-zinc-850 scrollbar-track-transparent bg-zinc-950/20 border border-zinc-900 p-2.5 rounded-xl">
+                        <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-zinc-855 scrollbar-track-transparent bg-zinc-950/20 border border-zinc-900 p-2.5 rounded-xl">
                           {(() => {
                             const played = [...(room.bingo_songs_played || [])].reverse();
                             if (played.length === 0) {
@@ -3519,15 +3701,36 @@ export default function AdminPage() {
                             }
                             return played.map((song: any, index: number) => {
                               const songIndex = room.bingo_songs_played.length - index;
+                              const isCurrentPlaying = room.music_video_playing && room.bingo_songs_played[room.bingo_songs_played.length - 1]?.title === song.title;
                               return (
-                                <div key={index} className="p-2 bg-zinc-950/40 border border-zinc-900/60 rounded-lg flex items-center justify-between gap-2">
-                                  <div className="min-w-0">
+                                <div key={index} className="p-2 bg-zinc-950/40 border border-zinc-900/60 rounded-lg flex items-center justify-between gap-2 hover:border-zinc-800 transition">
+                                  <div className="min-w-0 flex-1">
                                     <p className="text-xs font-bold text-white truncate">{song.title}</p>
                                     <p className="text-[10px] text-zinc-500 truncate">{song.artist}</p>
                                   </div>
-                                  <span className="text-[9px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono font-bold shrink-0">
-                                    #{songIndex}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {song.youtubeId && (
+                                      <button
+                                        onClick={() => handleToggleBingoPlay(song)}
+                                        disabled={!playerReady}
+                                        className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                          isCurrentPlaying
+                                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-500 hover:bg-amber-500/25'
+                                            : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-850'
+                                        }`}
+                                        title={isCurrentPlaying ? 'Pausar canción' : 'Reproducir canción'}
+                                      >
+                                        {isCurrentPlaying ? (
+                                          <Pause className="w-3 h-3 fill-current" />
+                                        ) : (
+                                          <Play className="w-3 h-3 fill-current" />
+                                        )}
+                                      </button>
+                                    )}
+                                    <span className="text-[9px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono font-bold">
+                                      #{songIndex}
+                                    </span>
+                                  </div>
                                 </div>
                               );
                             });
@@ -3554,14 +3757,37 @@ export default function AdminPage() {
                                   : 'border-zinc-900 bg-zinc-950/40 text-zinc-500'
                               }`}
                             >
-                              <div className="flex justify-between items-start gap-1 shrink-0">
+                              <div className="flex justify-between items-start gap-1 shrink-0 w-full">
                                 <span className={`text-[9px] font-mono font-bold shrink-0 ${hasPlayed ? 'text-amber-500' : 'text-zinc-600'}`}>
                                   {idx + 1}
                                 </span>
                                 {hasPlayed && (
-                                  <span className="text-[8px] bg-amber-500 text-zinc-950 px-1 py-0.2 rounded font-black shrink-0">
-                                    #{playedOrder}
-                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    {song.youtubeId && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleToggleBingoPlay(song);
+                                        }}
+                                        disabled={!playerReady}
+                                        className={`p-0.5 rounded border transition cursor-pointer ${
+                                          room.music_video_playing && room.bingo_songs_played[room.bingo_songs_played.length - 1]?.title === song.title
+                                            ? 'bg-amber-500 border-amber-400 text-zinc-950 hover:bg-amber-400'
+                                            : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-white hover:bg-zinc-800'
+                                        }`}
+                                        title="Reproducir/Pausar pista"
+                                      >
+                                        {room.music_video_playing && room.bingo_songs_played[room.bingo_songs_played.length - 1]?.title === song.title ? (
+                                          <Pause className="w-2.5 h-2.5 fill-current" />
+                                        ) : (
+                                          <Play className="w-2.5 h-2.5 fill-current" />
+                                        )}
+                                      </button>
+                                    )}
+                                    <span className="text-[8px] bg-amber-500 text-zinc-950 px-1 py-0.2 rounded font-black shrink-0">
+                                      #{playedOrder}
+                                    </span>
+                                  </div>
                                 )}
                               </div>
                               <div className="min-w-0 flex-1 flex flex-col justify-center mt-1">
