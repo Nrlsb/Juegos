@@ -30,6 +30,10 @@ interface Player {
   bingo_winner?: boolean;
   bingo_line_called?: boolean;
   bingo_line_winner?: boolean;
+  score_trivia?: number;
+  score_music?: number;
+  score_buzzer?: number;
+  score_bingo?: number;
 }
 
 export default function PlayPage({ params }: { params: Promise<{ code: string }> }) {
@@ -842,14 +846,34 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
 
             {/* Posición propia destacada */}
             {myPlayerInfo && (
-              <div className="bg-neon-purple/10 border border-neon-purple/30 p-4 rounded-2xl flex items-center justify-between mb-6">
-                <div>
-                  <span className="text-[9px] uppercase font-bold text-neon-purple block tracking-wider leading-none">Mi Posición</span>
-                  <span className="font-extrabold text-2xl text-white">#{myPosition > 0 ? myPosition : '-'}</span>
+              <div className="bg-neon-purple/10 border border-neon-purple/30 p-4 rounded-2xl flex flex-col gap-3 mb-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-neon-purple block tracking-wider leading-none">Mi Posición</span>
+                    <span className="font-extrabold text-2xl text-white">#{myPosition > 0 ? myPosition : '-'}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[9px] uppercase font-bold text-neon-purple block tracking-wider leading-none">Puntos Totales</span>
+                    <span className="font-black text-2xl text-neon-green font-mono">{myPlayerInfo.score} pts</span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-[9px] uppercase font-bold text-neon-purple block tracking-wider leading-none">Puntos Totales</span>
-                  <span className="font-black text-2xl text-neon-green font-mono">{myPlayerInfo.score} pts</span>
+                <div className="flex justify-between items-center pt-2.5 border-t border-neon-purple/20 text-[10px] text-zinc-400">
+                  <span className="flex items-center gap-1" title="Trivia">
+                    <HelpCircle className="w-3 h-3 text-neon-blue" />
+                    <span>Trivia: {myPlayerInfo.score_trivia || 0}</span>
+                  </span>
+                  <span className="flex items-center gap-1" title="Música">
+                    <Music className="w-3 h-3 text-neon-pink" />
+                    <span>Música: {myPlayerInfo.score_music || 0}</span>
+                  </span>
+                  <span className="flex items-center gap-1" title="Pulsador">
+                    <Zap className="w-3 h-3 text-neon-purple" />
+                    <span>Pulsador: {myPlayerInfo.score_buzzer || 0}</span>
+                  </span>
+                  <span className="flex items-center gap-1" title="Bingo">
+                    <Trophy className="w-3 h-3 text-amber-500" />
+                    <span>Bingo: {myPlayerInfo.score_bingo || 0}</span>
+                  </span>
                 </div>
               </div>
             )}
@@ -861,7 +885,7 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                 return (
                   <div 
                     key={player.id} 
-                    className={`p-3 rounded-xl flex items-center justify-between border text-sm ${
+                    className={`p-3 rounded-xl flex flex-col gap-2 border text-sm ${
                       isMe 
                         ? 'border-neon-purple bg-neon-purple/10' 
                         : idx === 0 
@@ -869,15 +893,38 @@ export default function PlayPage({ params }: { params: Promise<{ code: string }>
                         : 'border-zinc-900 bg-zinc-950/40'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <span className={`w-6 h-6 rounded-md flex items-center justify-center font-mono font-bold text-xs ${
-                        idx === 0 ? 'bg-neon-blue text-zinc-950' : 'bg-zinc-800 text-zinc-400'
-                      }`}>
-                        {idx + 1}
-                      </span>
-                      <span className={`font-bold ${isMe ? 'text-neon-purple' : 'text-zinc-200'}`}>{player.nickname} {isMe && '(Tú)'}</span>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-6 h-6 rounded-md flex items-center justify-center font-mono font-bold text-xs ${
+                          idx === 0 ? 'bg-neon-blue text-zinc-950' : 'bg-zinc-800 text-zinc-400'
+                        }`}>
+                          {idx + 1}
+                        </span>
+                        <span className={`font-bold ${isMe ? 'text-neon-purple' : 'text-zinc-200'}`}>{player.nickname} {isMe && '(Tú)'}</span>
+                      </div>
+                      <span className="font-mono font-bold text-neon-green">{player.score} pts</span>
                     </div>
-                    <span className="font-mono font-bold text-neon-green">{player.score} pts</span>
+                    <div className="flex items-center gap-2 text-[10px] text-zinc-500 pl-8">
+                      <span className="flex items-center gap-0.5" title="Trivia">
+                        <HelpCircle className="w-2.5 h-2.5 text-neon-blue/80" />
+                        <span>{player.score_trivia || 0}</span>
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-0.5" title="Música">
+                        <Music className="w-2.5 h-2.5 text-neon-pink/80" />
+                        <span>{player.score_music || 0}</span>
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-0.5" title="Pulsador">
+                        <Zap className="w-2.5 h-2.5 text-neon-purple/80" />
+                        <span>{player.score_buzzer || 0}</span>
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-0.5" title="Bingo">
+                        <Trophy className="w-2.5 h-2.5 text-amber-500/80" />
+                        <span>{player.score_bingo || 0}</span>
+                      </span>
+                    </div>
                   </div>
                 );
               })}

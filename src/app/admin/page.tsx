@@ -37,6 +37,10 @@ interface Player {
   bingo_winner?: boolean;
   bingo_line_called?: boolean;
   bingo_line_winner?: boolean;
+  score_trivia?: number;
+  score_music?: number;
+  score_buzzer?: number;
+  score_bingo?: number;
 }
 
 interface ResponseCount {
@@ -848,9 +852,21 @@ export default function AdminPage() {
             const player = players.find(p => p.id === resp.player_id);
             const currentScore = player ? player.score : 0;
             
+            const isMusic = currentQuestion.category === 'music';
+            const points = resp.points_awarded;
+            
+            const updateData: any = { score: currentScore + points };
+            if (isMusic) {
+              const currentMusicScore = player ? (player.score_music || 0) : 0;
+              updateData.score_music = currentMusicScore + points;
+            } else {
+              const currentTriviaScore = player ? (player.score_trivia || 0) : 0;
+              updateData.score_trivia = currentTriviaScore + points;
+            }
+
             await supabase
               .from('players')
-              .update({ score: currentScore + resp.points_awarded })
+              .update(updateData)
               .eq('id', resp.player_id);
           }
         }
@@ -1419,16 +1435,20 @@ export default function AdminPage() {
       if (!player) return;
 
       const newScore = player.score + points;
+      const newBuzzerScore = (player.score_buzzer || 0) + points;
 
       const { error } = await supabase
         .from('players')
-        .update({ score: newScore })
+        .update({ 
+          score: newScore,
+          score_buzzer: newBuzzerScore
+        })
         .eq('id', playerId);
 
       if (error) throw error;
 
       // Actualizar la lista local
-      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, score: newScore } : p));
+      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, score: newScore, score_buzzer: newBuzzerScore } : p));
       
       // Sonido de éxito
       try {
@@ -1621,12 +1641,17 @@ export default function AdminPage() {
       const winnerPlayer = players.find(p => p.id === winnerId);
       if (winnerPlayer) {
         const newScore = winnerPlayer.score + 20;
+        const newBingoScore = (winnerPlayer.score_bingo || 0) + 20;
         await supabase
           .from('players')
-          .update({ score: newScore, bingo_winner: true })
+          .update({ 
+            score: newScore, 
+            score_bingo: newBingoScore,
+            bingo_winner: true 
+          })
           .eq('id', winnerId);
         
-        setPlayers(prev => prev.map(p => p.id === winnerId ? { ...p, score: newScore, bingo_winner: true } : p));
+        setPlayers(prev => prev.map(p => p.id === winnerId ? { ...p, score: newScore, score_bingo: newBingoScore, bingo_winner: true } : p));
       }
 
       // 3. Cambiar el estado de la sala a 'FINISHED' para mostrar la pantalla final de celebración
@@ -1701,11 +1726,13 @@ export default function AdminPage() {
       if (!player) return;
 
       const newScore = player.score + 10; // Línea: 10 puntos
+      const newBingoScore = (player.score_bingo || 0) + 10;
 
       const { error: pError } = await supabase
         .from('players')
         .update({ 
           score: newScore,
+          score_bingo: newBingoScore,
           bingo_line_winner: true,
           bingo_line_called: false
         })
@@ -1714,7 +1741,7 @@ export default function AdminPage() {
       if (pError) throw pError;
 
       // Actualizar la lista local de jugadores
-      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, score: newScore, bingo_line_winner: true, bingo_line_called: false } : p));
+      setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, score: newScore, score_bingo: newBingoScore, bingo_line_winner: true, bingo_line_called: false } : p));
 
       // Sonido de éxito
       try {
@@ -2611,8 +2638,28 @@ export default function AdminPage() {
                           </span>
                           <span className="font-bold text-white text-lg">{player.nickname}</span>
                         </div>
-                        <div className="font-mono text-xl font-black text-neon-green">
-                          {player.score} <span className="text-[10px] text-zinc-400 font-normal uppercase">pts</span>
+                        <div className="flex flex-col items-end">
+                          <div className="font-mono text-xl font-black text-neon-green">
+                            {player.score} <span className="text-[10px] text-zinc-400 font-normal uppercase">pts</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1.5 text-zinc-400 text-xs">
+                            <span className="flex items-center gap-1 font-mono bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-800/80" title="Trivia">
+                              <HelpCircle className="w-3.5 h-3.5 text-neon-blue" />
+                              <span>{player.score_trivia || 0}</span>
+                            </span>
+                            <span className="flex items-center gap-1 font-mono bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-800/80" title="Música / Disney">
+                              <Music className="w-3.5 h-3.5 text-neon-pink" />
+                              <span>{player.score_music || 0}</span>
+                            </span>
+                            <span className="flex items-center gap-1 font-mono bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-800/80" title="Pulsador">
+                              <Zap className="w-3.5 h-3.5 text-neon-purple" />
+                              <span>{player.score_buzzer || 0}</span>
+                            </span>
+                            <span className="flex items-center gap-1 font-mono bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-800/80" title="Bingo">
+                              <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                              <span>{player.score_bingo || 0}</span>
+                            </span>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -3821,10 +3868,33 @@ export default function AdminPage() {
                 {players.map((p, index) => (
                   <div 
                     key={p.id}
-                    className="p-3 bg-zinc-950/40 border border-zinc-900 rounded-xl flex items-center justify-between hover:border-zinc-800 transition"
+                    className="p-3 bg-zinc-950/40 border border-zinc-900 rounded-xl flex flex-col gap-1.5 hover:border-zinc-800 transition"
                   >
-                    <span className="font-medium text-zinc-200 text-sm truncate max-w-[120px]">{p.nickname}</span>
-                    <span className="font-mono text-xs font-semibold text-neon-green">{p.score} pts</span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-zinc-200 text-sm truncate max-w-[120px]">{p.nickname}</span>
+                      <span className="font-mono text-xs font-semibold text-neon-green">{p.score} pts</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                      <span className="flex items-center gap-0.5" title="Trivia">
+                        <HelpCircle className="w-2.5 h-2.5 text-neon-blue/80" />
+                        <span>{p.score_trivia || 0}</span>
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-0.5" title="Música">
+                        <Music className="w-2.5 h-2.5 text-neon-pink/80" />
+                        <span>{p.score_music || 0}</span>
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-0.5" title="Pulsador">
+                        <Zap className="w-2.5 h-2.5 text-neon-purple/80" />
+                        <span>{p.score_buzzer || 0}</span>
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-0.5" title="Bingo">
+                        <Trophy className="w-2.5 h-2.5 text-amber-500/80" />
+                        <span>{p.score_bingo || 0}</span>
+                      </span>
+                    </div>
                   </div>
                 ))}
 
